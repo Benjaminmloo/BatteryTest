@@ -5,6 +5,7 @@
 
 #define VER "0.0"
 
+//pin values
 #define TFT_PIN_CS A3
 #define TFT_PIN_CD A2 
 #define TFT_PIN_WR A1
@@ -19,47 +20,23 @@
 #define SEN_PIN_C A1
 #define SEN_PIN_REF A5
 
-#define VREF 3.3 //actual reference voltage
+//sensor reading  values
+#define VREF 3.3 //reference voltage
 #define VDIV 6 //voltage divider compensation factor
 
-#define VCUR 10
+#define VCUR 10 //voltage conversion factor for current sensor
 
-#define CUR_OFFSET -1 * (curRef / 2.042) * VCUR
+#define CUR_OFFSET currentSenRef * -1 * VCUR / 2.042
 
-#define ADC_DIV 1024
+#define ADC_DIV 1024 
 
 #define SEN_GAIN_V ((VREF * VDIV) / (ADC_DIV))//range of supply / (range of analog read * max int value)
 #define SEN_GAIN_C ((VREF * VCUR) / ADC_DIV)
 #define SEN_GAIN_REF (VREF * VDIV / ADC_DIV)
 
+//screen values
 #define SCREEN_WIDTH 320 // tft display width, in pixels
 #define SCREEN_HEIGHT 240 // tft display height, in pixels
-
-#define MENU_Y 170
-
-#define CC 0
-#define CP 1
-
-#define ST_SETUP 0
-#define ST_SET 1
-#define ST_VERIFY 2
-#define ST_RUN 3
-#define ST_QUIT 4
-
-#define SU_CR_MODE 0
-#define SU_CR_SET_RATE 1
-#define SU_CR_SET_COV 2
-#define SU_CR_START 3
-
-#define SU_CR_POSITIONS 4
-
-#define TICK_LENGTH 100
-#define DEBOUNCE_DELAY 700
-
-#define MAX_CURRENT 19.0
-#define SET_STEP 0.1
-#define FLOAT_PREC 2
-#define FLOAT_MINL 5
 
 #define LTBLUE    0xB6DF
 #define LTTEAL    0xBF5F
@@ -99,6 +76,58 @@
 #define DKPURPLE  0x4010
 #define DKGREY    0x4A49
 
+#define MENU_Y 170
+
+//State variable values
+#define CC 0
+#define CP 1
+
+#define ST_SETUP 0
+#define ST_SET 1
+#define ST_VERIFY 2
+#define ST_RUN 3
+#define ST_QUIT 4
+
+#define NUM_ST 5
+
+#define CR_MODE 0
+#define CR_SET_RATE 1
+#define CR_SET_COV 2
+#define CR_START 3
+#define CR_YES 4
+#define CR_NO 5
+
+//Field index value
+#define I_S_CUR 0
+#define I_S_COV 1
+#define I_S_PWR 2
+
+#define I_C_CUR 3
+#define I_C_VLT 4
+#define I_C_PWR 5
+
+#define I_C_CHG 6
+#define I_C_NRG 7 //energy
+
+//Operational values
+#define TICK_LENGTH 100
+#define DEBOUNCE_DELAY 700
+#define SENSOR_UPDATE_T 500
+
+#define MAX_CURRENT 19.0
+#define SET_STEP 0.1
+
+#define FLOAT_PREC 2
+#define FLOAT_MIN_L 5
+
+#define NUM_VALUES 9
+#define NUM_FIELDS 5
+#define FLD_STR_L 8
+#define POSTFIX_L 3
+
+#define MODE_X 66
+#define MODE_Y MENU_Y
+
 Adafruit_TFTLCD tft(TFT_PIN_CS, TFT_PIN_CD, TFT_PIN_WR, TFT_PIN_RD, TFT_PIN_RT);
 
 
@@ -107,52 +136,50 @@ volatile int encDir;
 volatile bool newEnc;
 volatile bool newBtn;
 
-volatile bool enEnc;
 volatile bool enBtn;
 
 byte state;
 byte cursorPos;
 
+int cursorX[] = {11, 11, 11, 88, 88, 88, 11, 11};
+int cursorY[] = {MENU_Y + 15, MENU_Y + 30, MENU_Y + 15, MENU_Y + 15, MENU_Y + 30, MENU_Y + 15, MENU_Y, MENU_Y};
+
 bool mode;
 bool viewMode;
+bool displayedMode;
+char modeStr[][3] = {"CC", "CP"};
+
 bool setSel;
 bool quit;
 bool negCurrent;
 bool redraw;
+bool showCursor;
+bool printSen;
 
-byte bufferPos;
-bool curCharBuffer;
-char charBuffer [2][96];
-char tempBuffer [10];
-float ox,oy;
+float currentSenRef;
+float value[NUM_VALUES];
+char valuePostfix[][3] = {"A", "V", "W", "A", "V", "W", "Ah", "Wh"};
+byte valueField[] = {1, 2, 1, 3, 4, 0, 0};
 
-float setCurrent;
-float setPower;
-
-float curCurrent;
-float curVoltage;
-float curPower;
-float curRef;
-
-float curCharge;
-float curEnergy;
-
-float cutOffV;
-
+                             
+char fieldLastWr[NUM_FIELDS][FLD_STR_L];
+int fieldX[] = {11, 11, 11, 88, 88};
+int fieldY[] = { MENU_Y, MENU_Y + 15, MENU_Y + 30, MENU_Y + 15, MENU_Y + 30};
 
 float checkVal;
+float ox,oy;
 
 unsigned long lastTick;
+unsigned long lastUpdate;
 unsigned long lastBtn;
 unsigned long lastEnc;
-bool showCursor;
 
 
 void setup() {
   Serial.begin(9600);
   
-  tft.reset();
   tft.begin(0x9325);
+  tft.reset();
 
   tft.setRotation(3);
   
@@ -160,7 +187,7 @@ void setup() {
   tft.setTextSize(0x02);
   tft.fillScreen(BLACK);
   
-  dispFlash();
+  printFlash();
   
 //initiallize timers
   lastTick = 0;
@@ -174,7 +201,7 @@ void setup() {
 //initialize menu state
   state = ST_SETUP;
   mode = CC;
-  cursorPos = SU_CR_MODE;
+  cursorPos = CR_MODE;
 
 //Initialize interupts
   attachInterrupt(2, doEncoder, RISING);
@@ -185,7 +212,6 @@ void setup() {
   newEnc = 0;
   newBtn = 0;
   
-  enEnc = 0;
   enBtn = 0;
   
   float x, y;
@@ -199,7 +225,7 @@ void setup() {
   
   delay(1000);
   
-  dispSetup();
+  initSetupDisplay();
 }
 
 void loop() {
@@ -207,29 +233,57 @@ void loop() {
     case ST_SETUP: //while in setup
       if(newBtn){  //on button press
         switch(cursorPos){
-          case SU_CR_SET_RATE:
-          case SU_CR_SET_COV:
+          case CR_SET_RATE:
+          case CR_SET_COV:
             state = ST_SET; // otherwise move to set state
             break;
-          case SU_CR_MODE:
+          case CR_MODE:
+            if(mode == CC){
+              updateValue(I_S_CUR, value[I_S_CUR], true);
+            } else {
+              updateValue(I_S_PWR, value[I_S_PWR], true);
+            }
+            
             mode = !mode;
             break;
-          case SU_CR_START: //if curson is on start change to that state and reset cursor
+          case CR_START: //if cursor is on start change to that state and reset cursor
             state = ST_VERIFY;
             quit = 0;
+            initVerifyDisplay();
             break;
         }
         newBtn = false;
       }
       
       if(newEnc){
-        if(!(cursorPos == 0 && encDir < 0 || cursorPos == SU_CR_POSITIONS - 1 && encDir > 0)){
-          cursorPos = cursorPos + encDir;
+        switch(cursorPos){
+          case CR_MODE:
+            if(encDir < 0){
+              cursorPos = CR_SET_RATE;
+            }
+            break;
+          case CR_SET_RATE:
+            if(encDir > 0){
+              cursorPos = CR_MODE;
+            } else if (encDir < 0) {
+              cursorPos = CR_SET_COV;
+            }
+            break;
+          case CR_SET_COV:
+            if(encDir > 0){
+              cursorPos = CR_SET_RATE;
+            } else if (encDir < 0) {
+              cursorPos = CR_START;
+            }
+            break;
+          case CR_START:
+            if(encDir > 0){
+              cursorPos = CR_SET_COV;
+            }
+            break;
         }
         newEnc = false;
       }
-      
-      dispSetup();
       break;
     case ST_SET:
       if(newBtn){
@@ -239,29 +293,31 @@ void loop() {
      
       if(newEnc){
         switch(cursorPos){
-          case SU_CR_SET_RATE:
+          case CR_SET_RATE:
             if(mode == CC){
-                checkVal = setCurrent + SET_STEP * encDir;
-                
-                if((encDir > 0 || checkVal > 0) && (encDir < 0 || checkVal < MAX_CURRENT))
-                  setCurrent = checkVal;
-            } else {
-                checkVal = setPower + SET_STEP * encDir;
-                
-                if(checkVal > 0)
-                  setPower = checkVal;
+              checkVal = value[I_S_CUR] + SET_STEP * encDir; //precalculate new setvalue
+              if((encDir > 0 || checkVal > 0) && (encDir < 0 || checkVal < MAX_CURRENT)){ //if the new set value is outside of the bounds don't set it
+                updateValue(I_S_CUR, checkVal, true);
+              }
               
+            } else {
+              checkVal = value[I_S_PWR] + SET_STEP * encDir;
+              
+              if(checkVal > 0){
+                updateValue(I_S_PWR, checkVal, true);
+              }
+            
             }
           break;
-          case SU_CR_SET_COV:
-            checkVal = cutOffV + SET_STEP * encDir;
-            if((encDir > 0 || checkVal > 0) && (encDir < 0 || checkVal < curVoltage))
-              cutOffV = checkVal;
+          case CR_SET_COV:
+            checkVal = value[I_S_COV] + SET_STEP * encDir;
+            if((encDir > 0 || checkVal > 0) && (encDir < 0 || checkVal < value[I_C_VLT]))
+              value[I_S_COV] = checkVal;
+              updateValue(I_S_COV, checkVal, true);
           break;
         }
         newEnc = false;
       }
-      dispSetup();
     break;
     case ST_VERIFY:
       if(newBtn){
@@ -270,10 +326,14 @@ void loop() {
           viewMode = mode;
           
           cursorPos = 0;
-          curCharge = 0;
-          curEnergy = 0;
+          value[I_C_CHG] = 0;
+          value[I_C_NRG] = 0;
+          
+          initRunDisplay();
         }else {
           state = ST_SETUP;
+          cursorPos = 0;
+          initSetupDisplay();
         }
         newBtn = false;
       }
@@ -283,30 +343,40 @@ void loop() {
 
         newEnc = false;
       }
-      dispVerify();
     break;
     case ST_RUN:
       if(newBtn){
+        newBtn = false;
         state = ST_QUIT;
         quit = 0;
-        
-        newBtn = false;
+
+        initQuitDisplay();
       }
 
       if(newEnc){
+        if(viewMode){
+          updateValue(I_C_CHG, value[I_C_CHG], true);
+          updateValue(I_S_PWR, value[I_S_PWR], true);
+          updateValue(I_C_PWR, value[I_C_PWR], true);
+        } else {          
+          updateValue(I_C_NRG, value[I_C_NRG], true);
+          updateValue(I_S_PWR, value[I_S_PWR], true);
+          updateValue(I_C_PWR, value[I_C_PWR], true);
+        }
+        
         viewMode = !viewMode;
-
         newEnc = false;
       }
-
-    dispRun();
     break;
     case ST_QUIT:
       if(newBtn){
         if(quit){
           state = ST_SETUP;
-        }else {
+          cursorPos = 0;
+          initSetupDisplay();
+        } else {
           state = ST_RUN;
+          initRunDisplay();
         }
         newBtn = false;
       }
@@ -317,7 +387,6 @@ void loop() {
         newEnc = false;
       }
 
-    dispQuit();
     break;
   }
 
@@ -350,6 +419,11 @@ void checkTime(){
     lastTick = curTime;
     showCursor = !showCursor;
   }
+
+  if(curTime > lastUpdate + SENSOR_UPDATE_T){
+    lastUpdate = curTime;
+    printSen = true;
+  }
   
   if(!enBtn && curTime > lastBtn + DEBOUNCE_DELAY){
     lastBtn = curTime;
@@ -358,185 +432,172 @@ void checkTime(){
 }
 
 void checkSensors(){
-  curCurrent = analogRead(SEN_PIN_C) * SEN_GAIN_C + CUR_OFFSET;
-  if(curCurrent < 0){
-    curCurrent = 0;
-    negCurrent = true;
-  }else{
-    negCurrent = false;
-  }
-  curVoltage = analogRead(SEN_PIN_V) * SEN_GAIN_V;
-  curRef = analogRead(SEN_PIN_REF) * SEN_GAIN_V;
+  float readCurrent = analogRead(SEN_PIN_C) * SEN_GAIN_C + CUR_OFFSET;
+  float readVoltage = analogRead(SEN_PIN_V) * SEN_GAIN_V;
+  
+  bool doPrintCurrent = printSen && state == ST_RUN && viewMode == CC;
+  bool doPrintPower = printSen && state == ST_RUN && viewMode == CP;
+  bool doPrintVoltage = printSen && state < NUM_ST && state != ST_QUIT;
+  
+  
+  updateValue(I_C_CUR, readCurrent, doPrintCurrent);
+  updateValue(I_C_VLT, readVoltage, printSen);
+
+  updateValue(I_C_PWR, readVoltage * readCurrent, doPrintCurrent);
+  
+  
+  currentSenRef = analogRead(SEN_PIN_REF) * SEN_GAIN_V;
+  printSen &= 0;
 }
 
-void dispReset(){
-  tft.setCursor(0, MENU_Y);
-  tft.setTextColor(BLACK);
+void printString(char * str, int x, int y, int color){
+  tft.setCursor(x, y);
+  tft.setTextColor(color);
   tft.setTextSize(0x02);
-  tft.print(charBuffer[!curCharBuffer]);
-
-  bufferPos = 0;
+  
+  tft.print(str);
 }
 
-void addToBuffer(char newStr[]){
-  int i = 0;
+/*
+ * Updates value in field array
+ * if specified will erase last value written to screen and write the updated value
+ */
+void updateValue(byte v, float newValue, bool printUpdate){
+  byte field = valueField[v];
+  value[v] = newValue;
   
-  do{
-    charBuffer[curCharBuffer][bufferPos++] = newStr[i++];
-  }while(newStr[i] != 0);
+  if(printUpdate){
+    printString(fieldLastWr[field], fieldX[field], fieldY[field], BLACK);
+    printValue(v);
+  }
+}
+/*
+ * Renders field string based on current field value and prints to set location on screen
+ * stores last written field string for possible erasure
+ * 
+ * ARGS: byte f - position of field in data array
+ */
+void printValue(byte v){
+  byte field = valueField[v];
+  dtostrf(value[v], FLOAT_MIN_L, FLOAT_PREC, fieldLastWr[valueField[v]]);
+  memcpy(fieldLastWr[field] + FLOAT_MIN_L, valuePostfix[v], POSTFIX_L);
   
-  charBuffer[curCharBuffer][bufferPos] = 0;
+  printString(fieldLastWr[field], fieldX[field], fieldY[field], WHITE);
 }
 
-void dispBuffer(){
-  tft.setCursor(0, MENU_Y);
+void printFlash(){
+  tft.setCursor(11, MENU_Y);
   tft.setTextColor(WHITE);
   tft.setTextSize(0x02);
-  tft.print(charBuffer[curCharBuffer]);
   
-  curCharBuffer = !curCharBuffer;
+  tft.print("BATT TEST\n v");
+  tft.print(VER);
 }
 
-void dispFlash(){
-  addToBuffer("BATT TEST\nv");
-  addToBuffer(VER);
-  
-  dispReset();
-  dispBuffer();
+void printMode(bool m){
+  if(m != displayedMode){
+    tft.setCursor(MODE_X, MODE_Y);
+    tft.setTextColor(BLACK);
+    tft.setTextSize(0x02);
+
+    tft.print(modeStr[displayedMode]);
+  }
+
+  tft.setCursor(MODE_X, MODE_Y);
+  tft.setTextColor(WHITE);
+  tft.setTextSize(0x02);
+
+  tft.print(modeStr[m]);
 }
 
-void dispSetup(){
+void initSetupDisplay(){
+  tft.fillRect(0, MENU_Y, SCREEN_WIDTH, SCREEN_HEIGHT - MENU_Y, BLACK);
+  
+  tft.setCursor(11, MENU_Y);
+  tft.setTextColor(WHITE);
+  tft.setTextSize(0x02);
+  
+  tft.print("MODE:  ");
 
-  addToBuffer(cursorPos == SU_CR_MODE && (state != ST_SET || showCursor) ? ">" : " ");
-  addToBuffer("MODE:  ");
-  addToBuffer(mode == CC ? "CC\n" : "CP\n");
+  printMode(mode);
 
   if(mode == CC){
-    addToBuffer(cursorPos == SU_CR_SET_RATE && (state != ST_SET || showCursor) ? ">" : " ");
-    
-    addToBuffer(dtostrf(setCurrent, FLOAT_MINL, FLOAT_PREC, tempBuffer));
-    addToBuffer("A\n");
-  }
-  
-  if(mode == CP){
-    addToBuffer(cursorPos == SU_CR_SET_RATE && (state != ST_SET || showCursor) ? ">" : " ");
-    
-    addToBuffer(dtostrf(setPower, FLOAT_MINL, FLOAT_PREC, tempBuffer));
-    addToBuffer("W\n");
+    printValue(I_S_CUR);
+  }else if(mode == CP){
+    printValue(I_S_PWR);
   }
 
-  addToBuffer(cursorPos == SU_CR_SET_COV && (state != ST_SET || showCursor) ? ">" : " ");
-  
-  addToBuffer(dtostrf(cutOffV, FLOAT_MINL, FLOAT_PREC, tempBuffer));
-  addToBuffer("V ");
+  printValue(I_S_COV);
+  printValue(I_C_VLT);   
 
   
-  addToBuffer(dtostrf(curVoltage, FLOAT_MINL, FLOAT_PREC, tempBuffer));
-  addToBuffer("V\n");    
-
-  addToBuffer(cursorPos == SU_CR_START ? ">" : " ");
-  addToBuffer("START \n");
-  
-  dispReset();
-  dispBuffer();
+  tft.setCursor(11, MENU_Y + 45);
+  tft.print("START \n");
 }
 
-void dispVerify(){
-  dispReset();
+void initVerifyDisplay(){
+  tft.fillRect(0, MENU_Y, SCREEN_WIDTH, SCREEN_HEIGHT - MENU_Y, BLACK);
 
-  addToBuffer(" START? ");
+  tft.setCursor(11, MENU_Y);
+  tft.setTextColor(WHITE);
+  tft.setTextSize(0x02);
   
+  tft.print(" START? ");
+  
+  printMode(mode);
   
   if(mode == CC){
-    addToBuffer("CC\n");
-    
-    addToBuffer(dtostrf(setCurrent, FLOAT_MINL, FLOAT_PREC, tempBuffer));
-    addToBuffer("A ");
-    
-    addToBuffer(dtostrf(curCurrent, FLOAT_MINL, FLOAT_PREC, tempBuffer));
-    addToBuffer("A\n");
-  }
-  
-  if(mode == CP){
-    addToBuffer("CP\n");
-    
-    addToBuffer(dtostrf(setPower, FLOAT_MINL, FLOAT_PREC, tempBuffer));
-    addToBuffer("W ");
-    
-    addToBuffer(dtostrf(curPower, FLOAT_MINL, FLOAT_PREC, tempBuffer));
-    addToBuffer("W\n");
+    printValue(I_S_CUR);
+  }else if(mode == CP){
+    printValue(I_S_PWR);
   }
 
-
-  addToBuffer(dtostrf(cutOffV, FLOAT_MINL, FLOAT_PREC, tempBuffer));
-  addToBuffer("V ");
-
-  addToBuffer(dtostrf(curVoltage, FLOAT_MINL, FLOAT_PREC, tempBuffer));
-  addToBuffer("V\n");
-  
-  addToBuffer(quit && showCursor ? ">" : " ");
-  addToBuffer("Y  ");
-
-  addToBuffer(!quit && showCursor ? ">" : " ");
-  addToBuffer("N  ");
+  printValue(I_S_COV);
+  printValue(I_C_VLT);  
 
   
-  dispReset();
-  dispBuffer();
+  tft.setCursor(11, MENU_Y + 45);
+  tft.print("Y   N  ");
 }
 
-void dispRun(){
-  dispReset();
+void initRunDisplay(){
+  tft.fillRect(0, MENU_Y, SCREEN_WIDTH, SCREEN_HEIGHT - MENU_Y, BLACK);
+  tft.setCursor(11, MENU_Y);
+  tft.setTextColor(WHITE);
+  tft.setTextSize(0x02);
+  printMode(mode);
 
   if(viewMode == CC){
-    
-    addToBuffer(dtostrf(curCharge, FLOAT_MINL, FLOAT_PREC, tempBuffer));
-    addToBuffer("Ah   ");
-    
-    addToBuffer(mode == CC ? "CC\n" : "CP\n");
-    
-     
-    addToBuffer(dtostrf(setCurrent, FLOAT_MINL, FLOAT_PREC, tempBuffer));
-    addToBuffer("A ");
-    
-    addToBuffer(dtostrf(curCurrent, FLOAT_MINL, FLOAT_PREC, tempBuffer));
-    addToBuffer("A\n");
+    printValue(I_C_CHG);
+    printValue(I_S_CUR);
+    printValue(I_C_CUR);  
   }
   
   if(viewMode == CP){
-    addToBuffer(dtostrf(curEnergy, FLOAT_MINL, FLOAT_PREC, tempBuffer));
-    addToBuffer("Wh   ");
-    
-    addToBuffer(mode == CC ? "CC\n" : "CP\n");
-     
-    addToBuffer(dtostrf(setPower, FLOAT_MINL, FLOAT_PREC, tempBuffer));
-    addToBuffer("W ");
-    
-    addToBuffer(dtostrf(curPower, FLOAT_MINL, FLOAT_PREC, tempBuffer));
-    addToBuffer("W\n");
+    printValue(I_C_NRG);
+    printValue(I_S_PWR);
+    printValue(I_C_PWR);  
   }
   
-  addToBuffer(dtostrf(cutOffV, FLOAT_MINL, FLOAT_PREC, tempBuffer));
-  addToBuffer("V ");
+  printValue(I_S_COV);
+  printValue(I_C_VLT);  
 
-  addToBuffer(dtostrf(curVoltage, FLOAT_MINL, FLOAT_PREC, tempBuffer));
-  addToBuffer("V\n");
-    
-  addToBuffer(">STOP\n");
-  dispBuffer();
+  
+  tft.setCursor(11, MENU_Y + 45);
+  tft.print(">STOP");
 }
 
-void dispQuit(){
-  dispReset();
+void initQuitDisplay(){
+  tft.fillRect(0, MENU_Y, SCREEN_WIDTH, SCREEN_HEIGHT - MENU_Y, BLACK);
 
-  addToBuffer("   QUIT?\n\n  ");
+  tft.setCursor(11, MENU_Y);
+  tft.setTextColor(WHITE);
+  tft.setTextSize(0x02);
   
-  addToBuffer(quit && showCursor ? ">" : " ");
-  addToBuffer("Y  ");
-
-  addToBuffer(!quit && showCursor ? ">" : " ");
-  addToBuffer("N  ");
-  dispBuffer();
+  tft.print(" STOP?");
+  
+  tft.setCursor(11, MENU_Y + 45);
+  tft.print("Y   N  ");
 }
 
 /*
