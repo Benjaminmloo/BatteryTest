@@ -6,10 +6,10 @@
 #define VER "0.0"
 
 //pin values
-#define TFT_PIN_CS A3
-#define TFT_PIN_CD A2 
-#define TFT_PIN_WR A1
-#define TFT_PIN_RD A0
+#define TFT_PIN_CS 13
+#define TFT_PIN_CD 12
+#define TFT_PIN_WR 11
+#define TFT_PIN_RD 10
 #define TFT_PIN_RT -1
 
 #define ENC_PIN_A 0
@@ -28,7 +28,7 @@
 
 #define CUR_OFFSET currentSenRef * -1 * VCUR / 2.042
 
-#define ADC_DIV 1024 
+#define ADC_DIV 1024
 
 #define SEN_GAIN_V ((VREF * VDIV) / (ADC_DIV))//range of supply / (range of analog read * max int value)
 #define SEN_GAIN_C ((VREF * VCUR) / ADC_DIV)
@@ -161,13 +161,13 @@ float value[NUM_VALUES];
 char valuePostfix[][3] = {"A", "V", "W", "A", "V", "W", "Ah", "Wh"};
 byte valueField[] = {1, 2, 1, 3, 4, 0, 0};
 
-                             
+
 char fieldLastWr[NUM_FIELDS][FLD_STR_L];
 int fieldX[] = {11, 11, 11, 88, 88};
 int fieldY[] = { MENU_Y, MENU_Y + 15, MENU_Y + 30, MENU_Y + 15, MENU_Y + 30};
 
 float checkVal;
-float ox,oy;
+float ox, oy;
 
 unsigned long lastTick;
 unsigned long lastUpdate;
@@ -177,43 +177,43 @@ unsigned long lastEnc;
 
 void setup() {
   Serial.begin(9600);
-  
+
   tft.begin(0x9325);
   tft.reset();
 
   tft.setRotation(3);
-  
+
   tft.setTextColor(WHITE);
   tft.setTextSize(0x02);
   tft.fillScreen(BLACK);
-  
+
   printFlash();
-  
-//initiallize timers
+
+  //initiallize timers
   lastTick = 0;
   lastBtn = 0;
   lastEnc = 0;
-  
+
   pinMode(ENC_PIN_A, INPUT_PULLUP);
   pinMode(ENC_PIN_B, INPUT_PULLUP);
   pinMode(ENC_PIN_C, INPUT_PULLUP);
 
-//initialize menu state
+  //initialize menu state
   state = ST_SETUP;
   mode = CC;
   cursorPos = CR_MODE;
 
-//Initialize interupts
+  //Initialize interupts
   attachInterrupt(2, doEncoder, RISING);
   attachInterrupt(3, doButton, FALLING);
   delay(1000);
 
-//init interupt flags
+  //init interupt flags
   newEnc = 0;
   newBtn = 0;
-  
+
   enBtn = 0;
-  
+
   float x, y;
   redraw = true;
   for (x = 0; x <= 6.3; x += .1) {
@@ -222,28 +222,28 @@ void setup() {
     Graph(tft, x, y, 40, 140, 270, 120, 0, 6.5, 1, -1, 1, 0.2, "", "t", "V", DKBLUE, RED, YELLOW, WHITE, BLACK, redraw);
 
   }
-  
+
   delay(1000);
-  
+
   initSetupDisplay();
 }
 
 void loop() {
-  switch(state){
+  switch (state) {
     case ST_SETUP: //while in setup
-      if(newBtn){  //on button press
-        switch(cursorPos){
+      if (newBtn) { //on button press
+        switch (cursorPos) {
           case CR_SET_RATE:
           case CR_SET_COV:
             state = ST_SET; // otherwise move to set state
             break;
           case CR_MODE:
-            if(mode == CC){
+            if (mode == CC) {
               updateValue(I_S_CUR, value[I_S_CUR], true);
             } else {
               updateValue(I_S_PWR, value[I_S_PWR], true);
             }
-            
+
             mode = !mode;
             break;
           case CR_START: //if cursor is on start change to that state and reset cursor
@@ -254,30 +254,30 @@ void loop() {
         }
         newBtn = false;
       }
-      
-      if(newEnc){
-        switch(cursorPos){
+
+      if (newEnc) {
+        switch (cursorPos) {
           case CR_MODE:
-            if(encDir < 0){
+            if (encDir < 0) {
               cursorPos = CR_SET_RATE;
             }
             break;
           case CR_SET_RATE:
-            if(encDir > 0){
+            if (encDir > 0) {
               cursorPos = CR_MODE;
             } else if (encDir < 0) {
               cursorPos = CR_SET_COV;
             }
             break;
           case CR_SET_COV:
-            if(encDir > 0){
+            if (encDir > 0) {
               cursorPos = CR_SET_RATE;
             } else if (encDir < 0) {
               cursorPos = CR_START;
             }
             break;
           case CR_START:
-            if(encDir > 0){
+            if (encDir > 0) {
               cursorPos = CR_SET_COV;
             }
             break;
@@ -286,51 +286,51 @@ void loop() {
       }
       break;
     case ST_SET:
-      if(newBtn){
+      if (newBtn) {
         state = ST_SETUP;
         newBtn = false;
       }
-     
-      if(newEnc){
-        switch(cursorPos){
+
+      if (newEnc) {
+        switch (cursorPos) {
           case CR_SET_RATE:
-            if(mode == CC){
+            if (mode == CC) {
               checkVal = value[I_S_CUR] + SET_STEP * encDir; //precalculate new setvalue
-              if((encDir > 0 || checkVal > 0) && (encDir < 0 || checkVal < MAX_CURRENT)){ //if the new set value is outside of the bounds don't set it
+              if ((encDir > 0 || checkVal > 0) && (encDir < 0 || checkVal < MAX_CURRENT)) { //if the new set value is outside of the bounds don't set it
                 updateValue(I_S_CUR, checkVal, true);
               }
-              
+
             } else {
               checkVal = value[I_S_PWR] + SET_STEP * encDir;
-              
-              if(checkVal > 0){
+
+              if (checkVal > 0) {
                 updateValue(I_S_PWR, checkVal, true);
               }
-            
+
             }
-          break;
+            break;
           case CR_SET_COV:
             checkVal = value[I_S_COV] + SET_STEP * encDir;
-            if((encDir > 0 || checkVal > 0) && (encDir < 0 || checkVal < value[I_C_VLT]))
+            if ((encDir > 0 || checkVal > 0) && (encDir < 0 || checkVal < value[I_C_VLT]))
               value[I_S_COV] = checkVal;
-              updateValue(I_S_COV, checkVal, true);
-          break;
+            updateValue(I_S_COV, checkVal, true);
+            break;
         }
         newEnc = false;
       }
-    break;
+      break;
     case ST_VERIFY:
-      if(newBtn){
-        if(quit){
+      if (newBtn) {
+        if (quit) {
           state = ST_RUN;
           viewMode = mode;
-          
+
           cursorPos = 0;
           value[I_C_CHG] = 0;
           value[I_C_NRG] = 0;
-          
+
           initRunDisplay();
-        }else {
+        } else {
           state = ST_SETUP;
           cursorPos = 0;
           initSetupDisplay();
@@ -338,14 +338,14 @@ void loop() {
         newBtn = false;
       }
 
-      if(newEnc){
+      if (newEnc) {
         quit = !quit;
 
         newEnc = false;
       }
-    break;
+      break;
     case ST_RUN:
-      if(newBtn){
+      if (newBtn) {
         newBtn = false;
         state = ST_QUIT;
         quit = 0;
@@ -353,24 +353,24 @@ void loop() {
         initQuitDisplay();
       }
 
-      if(newEnc){
-        if(viewMode){
+      if (newEnc) {
+        if (viewMode) {
           updateValue(I_C_CHG, value[I_C_CHG], true);
           updateValue(I_S_PWR, value[I_S_PWR], true);
           updateValue(I_C_PWR, value[I_C_PWR], true);
-        } else {          
+        } else {
           updateValue(I_C_NRG, value[I_C_NRG], true);
           updateValue(I_S_PWR, value[I_S_PWR], true);
           updateValue(I_C_PWR, value[I_C_PWR], true);
         }
-        
+
         viewMode = !viewMode;
         newEnc = false;
       }
-    break;
+      break;
     case ST_QUIT:
-      if(newBtn){
-        if(quit){
+      if (newBtn) {
+        if (quit) {
           state = ST_SETUP;
           cursorPos = 0;
           initSetupDisplay();
@@ -381,13 +381,13 @@ void loop() {
         newBtn = false;
       }
 
-      if(newEnc){
+      if (newEnc) {
         quit = !quit;
 
         newEnc = false;
       }
 
-    break;
+      break;
   }
 
   checkTime();
@@ -395,7 +395,7 @@ void loop() {
 }
 
 void doEncoder() {
-  if(digitalRead(ENC_PIN_A) == digitalRead(ENC_PIN_B)){
+  if (digitalRead(ENC_PIN_A) == digitalRead(ENC_PIN_B)) {
     encDir = -1;
   } else {
     encDir = 1;
@@ -403,99 +403,102 @@ void doEncoder() {
   newEnc = true;
 }
 
-void doButton(){
-  if(enBtn){
+void doButton() {
+  if (enBtn) {
     enBtn = false;
-    if(digitalRead(ENC_PIN_C == 0)){
+    if (digitalRead(ENC_PIN_C == 0)) {
       newBtn = true;
     }
   }
 }
 
-void checkTime(){
+void checkTime() {
   unsigned long curTime = millis();
-  
-  if(curTime > lastTick + TICK_LENGTH){
+
+  if (curTime > lastTick + TICK_LENGTH) {
     lastTick = curTime;
     showCursor = !showCursor;
   }
 
-  if(curTime > lastUpdate + SENSOR_UPDATE_T){
+  if (curTime > lastUpdate + SENSOR_UPDATE_T) {
     lastUpdate = curTime;
     printSen = true;
   }
-  
-  if(!enBtn && curTime > lastBtn + DEBOUNCE_DELAY){
+
+  if (!enBtn && curTime > lastBtn + DEBOUNCE_DELAY) {
     lastBtn = curTime;
     enBtn = true;
   }
 }
 
-void checkSensors(){
+void checkSensors() {
   float readCurrent = analogRead(SEN_PIN_C) * SEN_GAIN_C + CUR_OFFSET;
   float readVoltage = analogRead(SEN_PIN_V) * SEN_GAIN_V;
-  
+
   bool doPrintCurrent = printSen && state == ST_RUN && viewMode == CC;
   bool doPrintPower = printSen && state == ST_RUN && viewMode == CP;
   bool doPrintVoltage = printSen && state < NUM_ST && state != ST_QUIT;
-  
-  
+
+
   updateValue(I_C_CUR, readCurrent, doPrintCurrent);
   updateValue(I_C_VLT, readVoltage, printSen);
 
   updateValue(I_C_PWR, readVoltage * readCurrent, doPrintCurrent);
-  
-  
+
+
   currentSenRef = analogRead(SEN_PIN_REF) * SEN_GAIN_V;
   printSen &= 0;
 }
 
-void printString(char * str, int x, int y, int color){
+void updateCursor();
+
+void printString(char * str, int x, int y, int color) {
   tft.setCursor(x, y);
   tft.setTextColor(color);
   tft.setTextSize(0x02);
-  
+
   tft.print(str);
 }
 
 /*
- * Updates value in field array
- * if specified will erase last value written to screen and write the updated value
- */
-void updateValue(byte v, float newValue, bool printUpdate){
+   Updates value in field array
+   if specified will erase last value written to screen and write the updated value
+*/
+void updateValue(byte v, float newValue, bool printUpdate) {
   byte field = valueField[v];
   value[v] = newValue;
-  
-  if(printUpdate){
+
+  if (printUpdate) {
     printString(fieldLastWr[field], fieldX[field], fieldY[field], BLACK);
     printValue(v);
   }
 }
+
 /*
- * Renders field string based on current field value and prints to set location on screen
- * stores last written field string for possible erasure
- * 
- * ARGS: byte f - position of field in data array
- */
-void printValue(byte v){
+   Renders field string based on current field value and prints to set location on screen
+   stores last written field string for possible erasure
+
+   ARGS: byte f - position of field in data array
+*/
+void printValue(byte v) {
   byte field = valueField[v];
   dtostrf(value[v], FLOAT_MIN_L, FLOAT_PREC, fieldLastWr[valueField[v]]);
   memcpy(fieldLastWr[field] + FLOAT_MIN_L, valuePostfix[v], POSTFIX_L);
-  
+
   printString(fieldLastWr[field], fieldX[field], fieldY[field], WHITE);
 }
 
-void printFlash(){
+void printFlash() {
   tft.setCursor(11, MENU_Y);
   tft.setTextColor(WHITE);
   tft.setTextSize(0x02);
-  
+
   tft.print("BATT TEST\n v");
   tft.print(VER);
 }
 
-void printMode(bool m){
-  if(m != displayedMode){
+void printMode(bool m) {
+  if (m != displayedMode) {
     tft.setCursor(MODE_X, MODE_Y);
     tft.setTextColor(BLACK);
     tft.setTextSize(0x02);
@@ -510,130 +513,130 @@ void printMode(bool m){
   tft.print(modeStr[m]);
 }
 
-void initSetupDisplay(){
+void initSetupDisplay() {
   tft.fillRect(0, MENU_Y, SCREEN_WIDTH, SCREEN_HEIGHT - MENU_Y, BLACK);
-  
+
   tft.setCursor(11, MENU_Y);
   tft.setTextColor(WHITE);
   tft.setTextSize(0x02);
-  
+
   tft.print("MODE:  ");
 
   printMode(mode);
 
-  if(mode == CC){
+  if (mode == CC) {
     printValue(I_S_CUR);
-  }else if(mode == CP){
+  } else if (mode == CP) {
     printValue(I_S_PWR);
   }
 
   printValue(I_S_COV);
-  printValue(I_C_VLT);   
+  printValue(I_C_VLT);
 
-  
+
   tft.setCursor(11, MENU_Y + 45);
   tft.print("START \n");
 }
 
-void initVerifyDisplay(){
+void initVerifyDisplay() {
   tft.fillRect(0, MENU_Y, SCREEN_WIDTH, SCREEN_HEIGHT - MENU_Y, BLACK);
 
   tft.setCursor(11, MENU_Y);
   tft.setTextColor(WHITE);
   tft.setTextSize(0x02);
-  
+
   tft.print(" START? ");
-  
+
   printMode(mode);
-  
-  if(mode == CC){
+
+  if (mode == CC) {
     printValue(I_S_CUR);
-  }else if(mode == CP){
+  } else if (mode == CP) {
     printValue(I_S_PWR);
   }
 
   printValue(I_S_COV);
-  printValue(I_C_VLT);  
+  printValue(I_C_VLT);
 
-  
+
   tft.setCursor(11, MENU_Y + 45);
   tft.print("Y   N  ");
 }
 
-void initRunDisplay(){
+void initRunDisplay() {
   tft.fillRect(0, MENU_Y, SCREEN_WIDTH, SCREEN_HEIGHT - MENU_Y, BLACK);
   tft.setCursor(11, MENU_Y);
   tft.setTextColor(WHITE);
   tft.setTextSize(0x02);
   printMode(mode);
 
-  if(viewMode == CC){
+  if (viewMode == CC) {
     printValue(I_C_CHG);
     printValue(I_S_CUR);
-    printValue(I_C_CUR);  
+    printValue(I_C_CUR);
   }
-  
-  if(viewMode == CP){
+
+  if (viewMode == CP) {
     printValue(I_C_NRG);
     printValue(I_S_PWR);
-    printValue(I_C_PWR);  
+    printValue(I_C_PWR);
   }
-  
-  printValue(I_S_COV);
-  printValue(I_C_VLT);  
 
-  
+  printValue(I_S_COV);
+  printValue(I_C_VLT);
+
+
   tft.setCursor(11, MENU_Y + 45);
   tft.print(">STOP");
 }
 
-void initQuitDisplay(){
+void initQuitDisplay() {
   tft.fillRect(0, MENU_Y, SCREEN_WIDTH, SCREEN_HEIGHT - MENU_Y, BLACK);
 
   tft.setCursor(11, MENU_Y);
   tft.setTextColor(WHITE);
   tft.setTextSize(0x02);
-  
+
   tft.print(" STOP?");
-  
+
   tft.setCursor(11, MENU_Y + 45);
   tft.print("Y   N  ");
 }
 
 /*
- * Graph: uses adafruit TFT drive library to draw a cartesian coordinate system and plot whatever data you want
- * just pass x and y and the graph will be drawn
- *
- * ARGS:
- *   &d name of your display object
- *   x = x data point
- *   y = y datapont
- *   gx = x graph location (lower left)
- *   gy = y graph location (lower left)
- *   w = width of graph
- *   h = height of graph
- *   xlo = lower bound of x axis
- *   xhi = upper bound of x asis
- *   xinc = division of x axis (distance not count)
- *   ylo = lower bound of y axis
- *   yhi = upper bound of y asis
- *   yinc = division of y axis (distance not count)
- *   title = title of graph
- *   xlabel = x asis label
- *   ylabel = y asis label
- *   gcolor = graph line colors
- *   acolor = axi ine colors
- *   pcolor = color of your plotted data
- *   tcolor = text color
- *   bcolor = background color
- *   &redraw = flag to redraw graph on fist call only
- *   
- * RETURN: void
- * Author:kris kasprzak - https://www.youtube.com/watch?v=YejRbIKe6e0
- */
+   Graph: uses adafruit TFT drive library to draw a cartesian coordinate system and plot whatever data you want
+   just pass x and y and the graph will be drawn
 
-void Graph( Adafruit_TFTLCD &d, double x, double y, double gx, double gy, double w, double h, double xlo, double xhi, double xinc, double ylo, double yhi, double yinc, String title, String xlabel, String ylabel, unsigned int gcolor, unsigned int acolor, unsigned int pcolor, unsigned int tcolor,unsigned int bcolor, boolean &redraw) {
-   double ydiv, xdiv;
+   ARGS:
+     &d name of your display object
+     x = x data point
+     y = y datapont
+     gx = x graph location (lower left)
+     gy = y graph location (lower left)
+     w = width of graph
+     h = height of graph
+     xlo = lower bound of x axis
+     xhi = upper bound of x asis
+     xinc = division of x axis (distance not count)
+     ylo = lower bound of y axis
+     yhi = upper bound of y asis
+     yinc = division of y axis (distance not count)
+     title = title of graph
+     xlabel = x asis label
+     ylabel = y asis label
+     gcolor = graph line colors
+     acolor = axi ine colors
+     pcolor = color of your plotted data
+     tcolor = text color
+     bcolor = background color
+     &redraw = flag to redraw graph on fist call only
+
+   RETURN: void
+   Author:kris kasprzak - https://www.youtube.com/watch?v=YejRbIKe6e0
+*/
+
+void Graph( Adafruit_TFTLCD &d, double x, double y, double gx, double gy, double w, double h, double xlo, double xhi, double xinc, double ylo, double yhi, double yinc, String title, String xlabel, String ylabel, unsigned int gcolor, unsigned int acolor, unsigned int pcolor, unsigned int tcolor, unsigned int bcolor, boolean &redraw) {
+  double ydiv, xdiv;
   // initialize old x and old y in order to draw the first point of the graph
   // but save the transformed value
   // note my transform funcition is the same as the map function, except the map uses long and we need doubles
