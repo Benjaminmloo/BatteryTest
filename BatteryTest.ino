@@ -1,19 +1,17 @@
 #include <SPI.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_TFTLCD.h>
+#include <Adafruit_ST7735.h>
 
 #define VER "0.0"
 
 //pin values
-#define TFT_PIN_CS 13
-#define TFT_PIN_CD 12
-#define TFT_PIN_WR 11
-#define TFT_PIN_RD 10
-#define TFT_PIN_RT -1
+#define TFT_PIN_CS 10
+#define TFT_PIN_DC 11
+#define TFT_PIN_RS 9
 
 #define ENC_PIN_A 0
-#define ENC_PIN_B 12
+#define ENC_PIN_B 13
 #define ENC_PIN_C 1
 
 #define SEN_PIN_V A0
@@ -26,17 +24,21 @@
 
 #define VCUR 10 //voltage conversion factor for current sensor
 
-#define CUR_OFFSET currentSenRef * -1 * VCUR / 2.042
+#define CUR_OFFSET (currentSenRef * -1 * VCUR / 2.042)
 
 #define ADC_DIV 1024
 
 #define SEN_GAIN_V ((VREF * VDIV) / (ADC_DIV))//range of supply / (range of analog read * max int value)
 #define SEN_GAIN_C ((VREF * VCUR) / ADC_DIV)
-#define SEN_GAIN_REF (VREF * VDIV / ADC_DIV)
 
 //screen values
-#define SCREEN_WIDTH 320 // tft display width, in pixels
-#define SCREEN_HEIGHT 240 // tft display height, in pixels
+#define SCREEN_WIDTH 160 // tft display width, in pixels
+#define SCREEN_HEIGHT 128 // tft display height, in pixels
+
+#define MENU_Y (SCREEN_HEIGHT - 64)
+
+#define MODE_X 108
+#define MODE_Y MENU_Y
 
 #define LTBLUE    0xB6DF
 #define LTTEAL    0xBF5F
@@ -76,8 +78,6 @@
 #define DKPURPLE  0x4010
 #define DKGREY    0x4A49
 
-#define MENU_Y 170
-
 //State variable values
 #define CC 0
 #define CP 1
@@ -94,8 +94,9 @@
 #define CR_SET_RATE 1
 #define CR_SET_COV 2
 #define CR_START 3
-#define CR_YES 4
-#define CR_NO 5
+#define CR_NO 4
+#define CR_YES CR_START
+#define CR_QUIT CR_START
 
 //Field index value
 #define I_S_CUR 0
@@ -111,7 +112,8 @@
 
 //Operational values
 #define TICK_LENGTH 100
-#define DEBOUNCE_DELAY 700
+#define DEBOUNCE_BTN_DELAY 700
+#define DEBOUNCE_ENC_DELAY 200
 #define SENSOR_UPDATE_T 500
 
 #define MAX_CURRENT 19.0
@@ -125,10 +127,8 @@
 #define FLD_STR_L 8
 #define POSTFIX_L 3
 
-#define MODE_X 66
-#define MODE_Y MENU_Y
 
-Adafruit_TFTLCD tft(TFT_PIN_CS, TFT_PIN_CD, TFT_PIN_WR, TFT_PIN_RD, TFT_PIN_RT);
+Adafruit_ST7735 tft = Adafruit_ST7735(TFT_PIN_CS, TFT_PIN_DC, TFT_PIN_RS);
 
 
 volatile int encDir;
@@ -136,13 +136,16 @@ volatile int encDir;
 volatile bool newEnc;
 volatile bool newBtn;
 
+volatile bool enEnc;
 volatile bool enBtn;
+
 
 byte state;
 byte cursorPos;
+byte lastCursorPos;
 
-int cursorX[] = {11, 11, 11, 88, 88, 88, 11, 11};
-int cursorY[] = {MENU_Y + 15, MENU_Y + 30, MENU_Y + 15, MENU_Y + 15, MENU_Y + 30, MENU_Y + 15, MENU_Y, MENU_Y};
+int cursorX[] = {0, 0, 0, 0, 48};
+int cursorY[] = {MENU_Y, MENU_Y + 16, MENU_Y + 32, MENU_Y + 48, MENU_Y + 48};
 
 bool mode;
 bool viewMode;
@@ -159,27 +162,25 @@ bool printSen;
 float currentSenRef;
 float value[NUM_VALUES];
 char valuePostfix[][3] = {"A", "V", "W", "A", "V", "W", "Ah", "Wh"};
-byte valueField[] = {1, 2, 1, 3, 4, 0, 0};
+byte valueField[] = {1, 2, 1, 3, 4, 3, 0, 0};
 
 
 char fieldLastWr[NUM_FIELDS][FLD_STR_L];
-int fieldX[] = {11, 11, 11, 88, 88};
-int fieldY[] = { MENU_Y, MENU_Y + 15, MENU_Y + 30, MENU_Y + 15, MENU_Y + 30};
+int fieldX[] = {12, 12, 12, 84, 84};
+int fieldY[] = { MENU_Y, MENU_Y + 16, MENU_Y + 32, MENU_Y + 16, MENU_Y + 32};
 
 float checkVal;
 float ox, oy;
 
 unsigned long lastTick;
 unsigned long lastUpdate;
-unsigned long lastBtn;
-unsigned long lastEnc;
+volatile unsigned long lastBtn;
+volatile unsigned long lastEnc;
 
 
 void setup() {
   Serial.begin(9600);
-
-  tft.begin(0x9325);
-  tft.reset();
+  tft.initR(INITR_BLACKTAB);
 
   tft.setRotation(3);
 
@@ -193,6 +194,7 @@ void setup() {
   lastTick = 0;
   lastBtn = 0;
   lastEnc = 0;
+  lastCursorPos = 0;
 
   pinMode(ENC_PIN_A, INPUT_PULLUP);
   pinMode(ENC_PIN_B, INPUT_PULLUP);
@@ -219,7 +221,7 @@ void setup() {
   for (x = 0; x <= 6.3; x += .1) {
 
     y = sin(x);
-    Graph(tft, x, y, 40, 140, 270, 120, 0, 6.5, 1, -1, 1, 0.2, "", "t", "V", DKBLUE, RED, YELLOW, WHITE, BLACK, redraw);
+    //Graph(tft, x, y, 40, 140, 270, 120, 0, 6.5, 1, -1, 1, 0.2, "", "t", "V", DKBLUE, RED, YELLOW, WHITE, BLACK, redraw);
 
   }
 
@@ -238,13 +240,14 @@ void loop() {
             state = ST_SET; // otherwise move to set state
             break;
           case CR_MODE:
+            mode = !mode;
             if (mode == CC) {
               updateValue(I_S_CUR, value[I_S_CUR], true);
             } else {
               updateValue(I_S_PWR, value[I_S_PWR], true);
             }
 
-            mode = !mode;
+            printMode();
             break;
           case CR_START: //if cursor is on start change to that state and reset cursor
             state = ST_VERIFY;
@@ -283,6 +286,7 @@ void loop() {
             break;
         }
         newEnc = false;
+        updateCursor();
       }
       break;
     case ST_SET:
@@ -312,8 +316,8 @@ void loop() {
           case CR_SET_COV:
             checkVal = value[I_S_COV] + SET_STEP * encDir;
             if ((encDir > 0 || checkVal > 0) && (encDir < 0 || checkVal < value[I_C_VLT]))
-              value[I_S_COV] = checkVal;
-            updateValue(I_S_COV, checkVal, true);
+              updateValue(I_S_COV, checkVal, true);
+            
             break;
         }
         newEnc = false;
@@ -321,26 +325,24 @@ void loop() {
       break;
     case ST_VERIFY:
       if (newBtn) {
-        if (quit) {
+        if(cursorPos == CR_YES) {
           state = ST_RUN;
-          viewMode = mode;
-
-          cursorPos = 0;
-          value[I_C_CHG] = 0;
-          value[I_C_NRG] = 0;
-
           initRunDisplay();
-        } else {
+        } else if (cursorPos == CR_NO){
           state = ST_SETUP;
-          cursorPos = 0;
           initSetupDisplay();
         }
         newBtn = false;
       }
 
       if (newEnc) {
-        quit = !quit;
-
+        if(cursorPos == CR_NO){
+          cursorPos = CR_YES;
+        }else{
+          cursorPos = CR_NO;
+        }
+        
+        updateCursor();
         newEnc = false;
       }
       break;
@@ -354,27 +356,27 @@ void loop() {
       }
 
       if (newEnc) {
-        if (viewMode) {
+        viewMode = !viewMode;
+        
+        if (viewMode == CC) {
           updateValue(I_C_CHG, value[I_C_CHG], true);
-          updateValue(I_S_PWR, value[I_S_PWR], true);
-          updateValue(I_C_PWR, value[I_C_PWR], true);
-        } else {
+          updateValue(I_S_CUR, value[I_S_CUR], true);
+          updateValue(I_C_CUR, value[I_C_CUR], true);
+        } else if (viewMode == CP) {
           updateValue(I_C_NRG, value[I_C_NRG], true);
           updateValue(I_S_PWR, value[I_S_PWR], true);
           updateValue(I_C_PWR, value[I_C_PWR], true);
         }
 
-        viewMode = !viewMode;
         newEnc = false;
       }
       break;
     case ST_QUIT:
       if (newBtn) {
-        if (quit) {
+        if (cursorPos == CR_YES) {
           state = ST_SETUP;
-          cursorPos = 0;
           initSetupDisplay();
-        } else {
+        } else if(cursorPos == CR_NO) {
           state = ST_RUN;
           initRunDisplay();
         }
@@ -382,11 +384,15 @@ void loop() {
       }
 
       if (newEnc) {
-        quit = !quit;
-
+        if(cursorPos == CR_NO){
+          cursorPos = CR_YES;
+        }else{
+          cursorPos = CR_NO;
+        }
+        
+        updateCursor();
         newEnc = false;
       }
-
       break;
   }
 
@@ -395,19 +401,27 @@ void loop() {
 }
 
 void doEncoder() {
-  if (digitalRead(ENC_PIN_A) == digitalRead(ENC_PIN_B)) {
-    encDir = -1;
-  } else {
-    encDir = 1;
+  unsigned long curTime = millis();
+  if(enEnc){
+    if (digitalRead(ENC_PIN_A) == digitalRead(ENC_PIN_B)) {
+      encDir = -1;
+    } else {
+      encDir = 1;
+    }
+    Serial.println(encDir);
+    newEnc = true;
+    enEnc = false;
+    lastEnc = curTime;
   }
-  newEnc = true;
 }
 
 void doButton() {
+  unsigned long curTime = millis();
   if (enBtn) {
     enBtn = false;
     if (digitalRead(ENC_PIN_C == 0)) {
       newBtn = true;
+      lastBtn = curTime;
     }
   }
 }
@@ -425,9 +439,14 @@ void checkTime() {
     printSen = true;
   }
 
-  if (!enBtn && curTime > lastBtn + DEBOUNCE_DELAY) {
+  if (!enBtn && curTime > lastBtn + DEBOUNCE_BTN_DELAY) {
     lastBtn = curTime;
     enBtn = true;
+  }
+
+  if (!enEnc && curTime > lastEnc + DEBOUNCE_ENC_DELAY) {
+    lastEnc = curTime;
+    enEnc = true;
   }
 }
 
@@ -441,16 +460,27 @@ void checkSensors() {
 
 
   updateValue(I_C_CUR, readCurrent, doPrintCurrent);
-  updateValue(I_C_VLT, readVoltage, printSen);
+  updateValue(I_C_VLT, readVoltage, doPrintVoltage);
 
-  updateValue(I_C_PWR, readVoltage * readCurrent, doPrintCurrent);
+  updateValue(I_C_PWR, readVoltage * readCurrent, doPrintPower);
 
 
   currentSenRef = analogRead(SEN_PIN_REF) * SEN_GAIN_V;
-  printSen &= 0;
+  printSen = false;
 }
 
-void updateCursor();
+void updateCursor(){
+  tft.setCursor(cursorX[lastCursorPos], cursorY[lastCursorPos]);
+  tft.setTextColor(BLACK);
+  tft.setTextSize(0x02);
+  tft.print('>');
+
+  tft.setCursor(cursorX[cursorPos], cursorY[cursorPos]);
+  tft.setTextColor(WHITE);
+  tft.print('>');
+
+  lastCursorPos = cursorPos;
+}
 
 void printString(char * str, int x, int y, int color) {
   tft.setCursor(x, y);
@@ -489,7 +519,7 @@ void printValue(byte v) {
 }
 
 void printFlash() {
-  tft.setCursor(11, MENU_Y);
+  tft.setCursor(12, MENU_Y);
   tft.setTextColor(WHITE);
   tft.setTextSize(0x02);
 
@@ -497,32 +527,37 @@ void printFlash() {
   tft.print(VER);
 }
 
-void printMode(bool m) {
-  if (m != displayedMode) {
-    tft.setCursor(MODE_X, MODE_Y);
-    tft.setTextColor(BLACK);
-    tft.setTextSize(0x02);
+void printMode() {
+  tft.setCursor(MODE_X, MODE_Y);
+  tft.setTextColor(BLACK);
+  tft.setTextSize(0x02);
 
-    tft.print(modeStr[displayedMode]);
-  }
+  tft.print(modeStr[displayedMode]);
 
   tft.setCursor(MODE_X, MODE_Y);
   tft.setTextColor(WHITE);
   tft.setTextSize(0x02);
 
-  tft.print(modeStr[m]);
+  tft.print(modeStr[mode]);
+  displayedMode = mode;
 }
 
 void initSetupDisplay() {
-  tft.fillRect(0, MENU_Y, SCREEN_WIDTH, SCREEN_HEIGHT - MENU_Y, BLACK);
+  tft.fillRect(0, MENU_Y, SCREEN_WIDTH, SCREEN_HEIGHT - 10, BLACK);
+  
+  cursorPos = CR_MODE;
+  updateCursor();
 
-  tft.setCursor(11, MENU_Y);
+  tft.setCursor(12, MENU_Y);
   tft.setTextColor(WHITE);
   tft.setTextSize(0x02);
 
   tft.print("MODE:  ");
+  
+  tft.setCursor(12, MENU_Y + 48);
+  tft.print("START \n");
 
-  printMode(mode);
+  printMode();
 
   if (mode == CC) {
     printValue(I_S_CUR);
@@ -534,20 +569,23 @@ void initSetupDisplay() {
   printValue(I_C_VLT);
 
 
-  tft.setCursor(11, MENU_Y + 45);
-  tft.print("START \n");
+
+  updateCursor();
 }
 
 void initVerifyDisplay() {
   tft.fillRect(0, MENU_Y, SCREEN_WIDTH, SCREEN_HEIGHT - MENU_Y, BLACK);
-
-  tft.setCursor(11, MENU_Y);
+  
+  cursorPos = CR_NO;
+  updateCursor();
+  
+  tft.setCursor(12, MENU_Y);
   tft.setTextColor(WHITE);
   tft.setTextSize(0x02);
 
   tft.print(" START? ");
 
-  printMode(mode);
+  printMode();
 
   if (mode == CC) {
     printValue(I_S_CUR);
@@ -559,16 +597,24 @@ void initVerifyDisplay() {
   printValue(I_C_VLT);
 
 
-  tft.setCursor(11, MENU_Y + 45);
+  tft.setCursor(12, MENU_Y + 48);
   tft.print("Y   N  ");
 }
 
 void initRunDisplay() {
+  viewMode = mode;
+  value[I_C_CHG] = 0;
+  value[I_C_NRG] = 0;
+  
   tft.fillRect(0, MENU_Y, SCREEN_WIDTH, SCREEN_HEIGHT - MENU_Y, BLACK);
-  tft.setCursor(11, MENU_Y);
+  
+  cursorPos = CR_QUIT;
+  updateCursor();
+  
+  tft.setCursor(12, MENU_Y);
   tft.setTextColor(WHITE);
   tft.setTextSize(0x02);
-  printMode(mode);
+  printMode();
 
   if (viewMode == CC) {
     printValue(I_C_CHG);
@@ -586,20 +632,22 @@ void initRunDisplay() {
   printValue(I_C_VLT);
 
 
-  tft.setCursor(11, MENU_Y + 45);
-  tft.print(">STOP");
+  tft.setCursor(12, MENU_Y + 48);
+  tft.print("STOP");
 }
 
 void initQuitDisplay() {
   tft.fillRect(0, MENU_Y, SCREEN_WIDTH, SCREEN_HEIGHT - MENU_Y, BLACK);
+  cursorPos = CR_NO;
+  updateCursor();
 
-  tft.setCursor(11, MENU_Y);
+  tft.setCursor(12, MENU_Y);
   tft.setTextColor(WHITE);
   tft.setTextSize(0x02);
 
   tft.print(" STOP?");
 
-  tft.setCursor(11, MENU_Y + 45);
+  tft.setCursor(12, MENU_Y + 48);
   tft.print("Y   N  ");
 }
 
@@ -635,7 +683,7 @@ void initQuitDisplay() {
    Author:kris kasprzak - https://www.youtube.com/watch?v=YejRbIKe6e0
 */
 
-void Graph( Adafruit_TFTLCD &d, double x, double y, double gx, double gy, double w, double h, double xlo, double xhi, double xinc, double ylo, double yhi, double yinc, String title, String xlabel, String ylabel, unsigned int gcolor, unsigned int acolor, unsigned int pcolor, unsigned int tcolor, unsigned int bcolor, boolean &redraw) {
+void Graph( Adafruit_ST7735 &d, double x, double y, double gx, double gy, double w, double h, double xlo, double xhi, double xinc, double ylo, double yhi, double yinc, String title, String xlabel, String ylabel, unsigned int gcolor, unsigned int acolor, unsigned int pcolor, unsigned int tcolor, unsigned int bcolor, boolean &redraw) {
   double ydiv, xdiv;
   // initialize old x and old y in order to draw the first point of the graph
   // but save the transformed value
@@ -666,7 +714,6 @@ void Graph( Adafruit_TFTLCD &d, double x, double y, double gx, double gy, double
       d.setTextSize(1);
       d.setTextColor(tcolor, bcolor);
       d.setCursor(gx - 30, temp);
-      // precision is default Arduino--this could really use some format control
       d.println(i, 1);
     }
     // draw x scale
