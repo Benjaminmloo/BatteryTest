@@ -24,8 +24,8 @@ volatile unsigned long lastEnc;
 
 //State Variables
 byte state;
-byte initEncState;
 byte cursorPos;
+byte controlValue;
 
 bool mode;
 bool viewMode; // mode being viewed on run
@@ -33,13 +33,14 @@ bool displayedMode; //last mode displayed on screen
 bool initialSenRead;
 bool showCursor;
 bool cursorHidden;
+bool initEncState;
 
 
 /*ARRAYS FOR VALUES*/
 char modeStr[][3] = {"CC", "CP"};
 
-int cursorX[] = {-20, 0, 0, 0, 0, TEXT_W * 5};
-int cursorY[] = {-20, MENU_Y, MENU_Y + TEXT_H, MENU_Y + TEXT_H * 2, MENU_Y + TEXT_H * 3, MENU_Y + TEXT_H * 3};
+int cursorX[] = { -20, 0, 0, 0, 0, TEXT_W * 5};
+int cursorY[] = { -20, MENU_Y, MENU_Y + TEXT_H, MENU_Y + TEXT_H * 2, MENU_Y + TEXT_H * 3, MENU_Y + TEXT_H * 3};
 
 //rolling average array for smoothing sensor values
 int curReading[NUM_READINGS];
@@ -75,7 +76,8 @@ bool redraw;
 
 void setup() {
   Serial.begin(9600);
-  
+  TCCR1B = TCCR1B & B11111000 | B00000001; // PWM frequency of pin 9 and 10 to 31372.55 Hz
+
   tft.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
 
   tft.setRotation(3);
@@ -97,12 +99,12 @@ void setup() {
   pinMode(ENC_PIN_C, INPUT_PULLUP);
 
   mode = CC;
-  
-  //Initialize interupts
-  attachInterrupt(3, doEncoder, RISING);
-  attachInterrupt(2, doButton, FALLING);
-  delay(1000);
 
+  //Initialize interupts
+  attachInterrupt(digitalPinToInterrupt(ENC_PIN_A), doEncoder, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_PIN_C), doButton, FALLING);
+  
+  delay(1000);
   //init interupt flags
   newEnc = 0;
   newBtn = 0;
@@ -114,7 +116,7 @@ void setup() {
   for (x = 0; x <= 6.3; x += .1) {
 
     y = sin(x);
-    Graph(tft, x, y, GRAPH_X, GRAPH_Y, GRAPH_W, GRAPH_H, 0, 6.5, 2, -1, 1, 0.5, "", "t", "V", DKBLUE, RED, YELLOW, WHITE, BLACK, redraw);
+    //Graph(tft, x, y, GRAPH_X, GRAPH_Y, GRAPH_W, GRAPH_H, 0, 6.5, 2, -1, 1, 0.5, "", "t", "V", DKBLUE, RED, YELLOW, WHITE, BLACK, redraw);
 
   }
 
@@ -298,9 +300,13 @@ void loop() {
       }
       break;
   }
-  
+
   checkTime();
   checkSensors();
+  updateControl();
+
+  //Serial.print(lastEnc);
+  //Serial.print('\n');
 }
 
 
@@ -318,13 +324,13 @@ void loop() {
 void doEncoder() {
   cli();
   unsigned long curTime, timeDif;
-  byte pinState = PINC & B10000000;
+  bool pinState = digitalRead(ENC_PIN_B);
   curTime = millis();
   timeDif = curTime - lastEnc;
-
-  if (curTime - lastEnc < DEBOUNCE_ENC_T) {
+  if (timeDif < DEBOUNCE_ENC_T) {
     if (enEnc) {
       if (initEncState != pinState) {
+        Serial.print("ENC UPDATE");
         newEnc = true;
         encDir = initEncState ? -1 : 1;
         enEnc = false;
@@ -332,10 +338,9 @@ void doEncoder() {
     }
 
   } else {
-    initEncState = pinState & B10000000;
+    initEncState = pinState;
     enEnc = true;
   }
-
 
   lastEnc = curTime;
   sei();
@@ -345,8 +350,8 @@ void doEncoder() {
    Button interupt handeler
 */
 void doButton() {
-  unsigned long curTime;
   cli();
+  unsigned long curTime;
   curTime = millis();
 
   if (curTime > lastBtn + DEBOUNCE_BTN_T) {
@@ -359,7 +364,7 @@ void doButton() {
 /*
    time management function
 
-   Updatees time sensetive flags not otherwise handled in interupts
+   Updates time sensetive flags not otherwise handled in interupts
 */
 void checkTime() {
   unsigned long curTime = millis();
@@ -367,8 +372,8 @@ void checkTime() {
   if (curTime > lastCursorFlash + CR_FLASH_T) {
     lastCursorFlash = curTime;
     showCursor = !showCursor;
-    if(state == ST_SET){
-      if(!showCursor){
+    if (state == ST_SET) {
+      if (!showCursor) {
         updateCursor(CR_NONE);
       } else {
         updateCursor(cursorPos);
@@ -384,6 +389,10 @@ void checkTime() {
 }
 
 /*
+
+
+
+
    updates values dependant on sensor readings
 
    Reads analog pins that pretain to current and voltage of the discharge circuit
@@ -433,15 +442,18 @@ void checkSensors() {
   updateValue(I_C_VLT, readVoltage, doPrintVoltage);
   updateValue(I_C_PWR, readVoltage * readCurrent, doPrintPower);
 
-  Serial.print(readVoltage, 4);
-  Serial.print(" - ");
-  Serial.print(currentSenRef, 4);
-  Serial.print(" / ");
-  Serial.print((curTotal / NUM_READINGS) * SEN_GAIN_CUR);
-  Serial.print(" - ");
-  Serial.print(CUR_OFFSET);
-  Serial.print(" = ");
-  Serial.println(readCurrent);
+  if (SENSOR_READOUT) {
+    Serial.print(readVoltage, 4);
+    Serial.print(", ");
+    Serial.print(currentSenRef, 4);
+    Serial.print(", ");
+    Serial.print((curTotal / NUM_READINGS) * SEN_GAIN_CUR);
+    Serial.print(", ");
+    Serial.print(CUR_OFFSET);
+    Serial.print(", ");
+    Serial.print(readCurrent);
+    Serial.print(", ");
+  }
 
   if (!initialSenRead && state == ST_RUN) {
     value[I_C_CHG] += value[I_C_CUR] * timeDif * H_PER_uS;
@@ -452,6 +464,33 @@ void checkSensors() {
   initialSenRead = false;
   printSen = false;
   lastSensorCheck = curTime;
+}
+
+void updateControl() {
+  int temp = controlValue;
+  if (state != ST_RUN) {
+    controlValue = MIN_CONTROL;
+  } else {
+    if (mode == CC && value[I_C_CUR] < value[I_S_CUR] ||
+        mode == CP && value[I_C_PWR] < value[I_S_PWR] ) {
+      temp += 1;
+    } else {
+      temp -= 1;
+    }
+
+    if (temp < MAX_CONTROL && temp > MIN_CONTROL) {
+      controlValue = temp;
+    }
+  }
+
+
+
+  analogWrite(CTL_PIN, controlValue);
+
+  if (SENSOR_READOUT) {
+    Serial.print(controlValue);
+    Serial.print(", ");
+  }
 }
 
 /*
@@ -490,7 +529,7 @@ void updateValue(byte v, double newValue, bool printUpdate) {
 void updateCursor(byte c) {
   printString(">", cursorX[cursorPos], cursorY[cursorPos], BLACK);
 
-  if(c != CR_NONE){
+  if (c != CR_NONE) {
     printString(">", cursorX[c], cursorY[c], WHITE);
     cursorPos = c;
   }

@@ -2,22 +2,22 @@
 #define VER "0.0"
 
 /*PINS USED*/
-#define TFT_PIN_CS 12
-#define TFT_PIN_DC 11
-#define TFT_PIN_RS 10
+#define TFT_PIN_CS 8
+#define TFT_PIN_DC 7
+#define TFT_PIN_RS 6
 
-#define ENC_PIN_A 1
-#define ENC_PIN_B 13
-#define ENC_PIN_C 0
+#define ENC_PIN_A 2
+#define ENC_PIN_B 5
+#define ENC_PIN_C 3
 
-#define SEN_PIN_VLT A1 //blue
-#define SEN_PIN_REF A0 //yellow
-#define SEN_PIN_CUR A4 //green
+#define SEN_PIN_VLT A1
+#define SEN_PIN_REF A2
+#define SEN_PIN_CUR A3
 
-#define CTL_PIN 5
+#define CTL_PIN 9
 
 /*SENSOR GAIN & OFFSETS*/
-#define REF_V 3.3 //reference voltage
+#define REF_V 4.6 //reference voltage
 
 //gains for coltage dividers adjust as needed for discrepencies in resistor values
 #define DIV_VLT 5.9615 //voltage divider on pin A0 
@@ -25,7 +25,7 @@
 
 #define CUR_V 10 //voltage conversion factor for current sensor
 
-#define CUR_OFFSET (currentSenRef * -1 * CUR_V / 2.0) + 0.15 //The voltage that the current sensor outputs at 0A
+#define CUR_OFFSET (currentSenRef * CUR_V / 2.0) - 0.15 //The voltage that the current sensor outputs at 0A
 #define VLT_OFFSET  0.0292
 #define REF_OFFSET  0.0192
 
@@ -33,7 +33,7 @@
 
 #define SEN_GAIN_VLT ((REF_V * DIV_VLT) / ADC_DIV)//range of supply / (range of analog read * max int value)
 #define SEN_GAIN_REF ((REF_V * DIV_REF) / ADC_DIV)
-#define SEN_GAIN_CUR ((REF_V * CUR_V) / ADC_DIV)
+#define SEN_GAIN_CUR -1 * ((REF_V * CUR_V) / ADC_DIV)
 
 #define H_PER_uS 2.777777777E-10
 
@@ -43,11 +43,11 @@
 #if SCREEN_WIDTH <= 160
   #define TEXT_SIZE 1
   #define TEXT_W 6
-  #define TEXT_H 8 
+  #define TEXT_H 8
 #else
   #define TEXT_SIZE 2
   #define TEXT_W 12
-  #define TEXT_H 16 
+  #define TEXT_H 16
 #endif
 
 #define MENU_Y (SCREEN_HEIGHT - TEXT_H * 4)
@@ -124,7 +124,7 @@
 #define CR_YES CR_START
 #define CR_QUIT CR_START
 
-//Value array 
+//Value array
 #define I_S_CUR 0
 #define I_S_COV 1
 #define I_S_PWR 2
@@ -137,12 +137,12 @@
 #define I_C_NRG 7 //energy
 
 #define NUM_VALUES 9
-#define NUM_READINGS 30
+#define NUM_READINGS 5
 #define NUM_FIELDS 5
 
 
 /*OPERATION VALUES*/
-
+#define SENSOR_READOUT false
 //Timing periods
 #define CR_FLASH_T 100
 #define DEBOUNCE_BTN_T 200
@@ -150,8 +150,14 @@
 #define SENSOR_PRINT_T 500
 
 //Boundry values
-#define MAX_CURRENT 19.0
-#define SET_STEP 0.1
+#define MAX_CURRENT 9.0
+#define MIN_CURRENT 0.0
+
+#define MAX_CONTROL 160
+#define MIN_CONTROL 0
+
+#define SET_STEP  0.1
+
 
 //Print values
 #define FLOAT_PREC 2
