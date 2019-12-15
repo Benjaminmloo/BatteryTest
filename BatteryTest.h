@@ -1,7 +1,8 @@
 
-#define VER "0.0"
+#define VER "0.1"
 
 /*PINS USED*/
+#define SDC_PIN_CS 10
 #define TFT_PIN_CS 8
 #define TFT_PIN_DC 7
 #define TFT_PIN_RS 6
@@ -17,16 +18,16 @@
 #define CTL_PIN 9
 
 /*SENSOR GAIN & OFFSETS*/
-#define REF_V 4.6 //reference voltage
+#define REF_V 5.0 //reference voltage
 
 //gains for coltage dividers adjust as needed for discrepencies in resistor values
-#define DIV_VLT 5.9615 //voltage divider on pin A0 
-#define DIV_REF 6.198//voltage divider on pin A1 compensation factor
+#define DIV_VLT 6.121 //voltage divider on pin A0 
+#define DIV_REF 6.09//voltage divider on pin A1 compensation factor
 
 #define CUR_V 10 //voltage conversion factor for current sensor
 
-#define CUR_OFFSET (currentSenRef * CUR_V / 2.0) - 0.15 //The voltage that the current sensor outputs at 0A
-#define VLT_OFFSET  0.0292
+#define CUR_OFFSET (currentSenRef * CUR_V / 2.0) + 0.15 //The voltage that the current sensor outputs at 0A
+#define VLT_OFFSET  0.0592
 #define REF_OFFSET  0.0192
 
 #define ADC_DIV 1023
@@ -143,6 +144,7 @@
 
 /*OPERATION VALUES*/
 #define SENSOR_READOUT false
+
 //Timing periods
 #define CR_FLASH_T 100
 #define DEBOUNCE_BTN_T 200
@@ -165,6 +167,8 @@
 
 #define FLD_STR_L 8
 #define POSTFIX_L 3
+
+#define LOG_PATH "batterylog.txt"
 
 /*MACROS*/
 #define CLEAR_TEXT_AREA tft.fillRect(0, MENU_Y, SCREEN_WIDTH, SCREEN_HEIGHT - MENU_Y, BLACK)

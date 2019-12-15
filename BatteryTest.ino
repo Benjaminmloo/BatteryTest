@@ -1,12 +1,14 @@
 #include <SPI.h>
+#include <SD.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7735.h>
 #include "BatteryTest.h"
 
-//Screen deffinition
-
+//object definitions
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_PIN_CS, TFT_PIN_DC, TFT_PIN_RS);
+File logFile;
+
 //Interupt Flags / Values
 volatile int encDir;
 
@@ -27,13 +29,13 @@ byte state;
 byte cursorPos;
 byte controlValue;
 
-bool mode;
-bool viewMode; // mode being viewed on run
-bool displayedMode; //last mode displayed on screen
-bool initialSenRead;
-bool showCursor;
-bool cursorHidden;
-bool initEncState;
+bool modeIsCP;
+bool viewModeIsCP; // mode being viewed on run
+bool displayedModeIsCP; //last mode displayed on screen
+bool senReadIsValid;  //needed to indicate when the sensor value buffers are full 
+bool showCursor; //whether or not the cursor should be shown
+bool initEncState;//the first reading of the non-interupt pin after set period
+bool SDIsValid = false; //Fully functioning SD card 
 
 
 /*ARRAYS FOR VALUES*/
@@ -41,6 +43,7 @@ char modeStr[][3] = {"CC", "CP"};
 
 int cursorX[] = { -20, 0, 0, 0, 0, TEXT_W * 5};
 int cursorY[] = { -20, MENU_Y, MENU_Y + TEXT_H, MENU_Y + TEXT_H * 2, MENU_Y + TEXT_H * 3, MENU_Y + TEXT_H * 3};
+
 
 //rolling average array for smoothing sensor values
 int curReading[NUM_READINGS];
@@ -76,6 +79,7 @@ bool redraw;
 
 void setup() {
   Serial.begin(9600);
+  
   TCCR1B = TCCR1B & B11111000 | B00000001; // PWM frequency of pin 9 and 10 to 31372.55 Hz
 
   tft.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
@@ -88,21 +92,38 @@ void setup() {
   tft.fillScreen(BLACK);
 
   printFlash();
-
+  
   //initiallize timers
   lastCursorFlash = 0;
   lastBtn = 0;
   lastEnc = 0;
-
+  
   pinMode(ENC_PIN_A, INPUT_PULLUP);
   pinMode(ENC_PIN_B, INPUT_PULLUP);
   pinMode(ENC_PIN_C, INPUT_PULLUP);
 
-  mode = CC;
-
+  modeIsCP = CC;
+  
+  
   //Initialize interupts
   attachInterrupt(digitalPinToInterrupt(ENC_PIN_A), doEncoder, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENC_PIN_C), doButton, FALLING);
+  
+  Serial.println("Initializing SD card...");
+  
+  if(SD.begin(SDC_PIN_CS)){
+    Serial.println("SD card found");
+    logFile = SD.open(LOG_PATH, FILE_WRITE);
+    if(logFile){
+      SDIsValid = true;
+      Serial.println("log opened");
+    } else {
+      Serial.println("log not availible");
+    }
+    logFile.close();
+  } else {
+    Serial.println("SD card NOT found");
+  }
   
   delay(1000);
   //init interupt flags
@@ -150,8 +171,8 @@ void loop() {
             state = ST_SET; // otherwise move to set state
             break;
           case CR_MODE:
-            mode = !mode;
-            if (mode == CC) {
+            modeIsCP = !modeIsCP;
+            if (modeIsCP == CC) {
               updateValue(I_S_CUR, value[I_S_CUR], true);
             } else {
               updateValue(I_S_PWR, value[I_S_PWR], true);
@@ -207,7 +228,7 @@ void loop() {
       if (newEnc) {
         switch (cursorPos) {
           case CR_SET_RATE:
-            if (mode == CC) {
+            if (modeIsCP == CC) {
               checkVal = value[I_S_CUR] + SET_STEP * encDir; //precalculate new setvalue
               if ((encDir > 0 || checkVal > 0) && (encDir < 0 || checkVal < MAX_CURRENT)) { //if the new set value is outside of the bounds don't set it
                 updateValue(I_S_CUR, checkVal, true);
@@ -262,13 +283,13 @@ void loop() {
       }
 
       if (newEnc) {
-        viewMode = !viewMode;
+        viewModeIsCP = !viewModeIsCP;
 
-        if (viewMode == CC) {
+        if (viewModeIsCP == CC) {
           updateValue(I_C_CHG, value[I_C_CHG], true);
           updateValue(I_S_CUR, value[I_S_CUR], true);
           updateValue(I_C_CUR, value[I_C_CUR], true);
-        } else if (viewMode == CP) {
+        } else if (viewModeIsCP == CP) {
           updateValue(I_C_NRG, value[I_C_NRG], true);
           updateValue(I_S_PWR, value[I_S_PWR], true);
           updateValue(I_C_PWR, value[I_C_PWR], true);
@@ -305,8 +326,8 @@ void loop() {
   checkSensors();
   updateControl();
 
-  //Serial.print(lastEnc);
-  //Serial.print('\n');
+  if(SENSOR_READOUT)
+    Serial.print('\n');
 }
 
 
@@ -389,10 +410,6 @@ void checkTime() {
 }
 
 /*
-
-
-
-
    updates values dependant on sensor readings
 
    Reads analog pins that pretain to current and voltage of the discharge circuit
@@ -413,8 +430,8 @@ void checkSensors() {
   double readCurrent;
 
   bool doPrintVoltage = printSen && state < NUM_ST && state != ST_QUIT;
-  bool doPrintCurrent = printSen && state == ST_RUN && viewMode == CC;
-  bool doPrintPower = printSen && state == ST_RUN && viewMode == CP;
+  bool doPrintCurrent = printSen && state == ST_RUN && viewModeIsCP == CC;
+  bool doPrintPower = printSen && state == ST_RUN && viewModeIsCP == CP;
 
   curTotal -= curReading[readIndex];
   vltTotal -= vltReading[readIndex];
@@ -454,30 +471,50 @@ void checkSensors() {
     Serial.print(readCurrent);
     Serial.print(", ");
   }
+  
 
-  if (!initialSenRead && state == ST_RUN) {
+  if (senReadIsValid && (state == ST_RUN || state == ST_QUIT)) {
     value[I_C_CHG] += value[I_C_CUR] * timeDif * H_PER_uS;
     value[I_C_NRG] += value[I_C_PWR] * timeDif * H_PER_uS;
+    
+    if(SDIsValid){
+      logFile = SD.open(LOG_PATH, FILE_WRITE);
+  
+      Serial.print(readVoltage, 4);
+      Serial.print(", ");
+      Serial.print(currentSenRef, 4);
+      Serial.print(", ");
+      Serial.print(value[I_C_CHG], 4);
+      Serial.print(", ");
+      Serial.println(value[I_C_NRG], 4);
+      
+      logFile.close();
+    }
   }
 
-
-  initialSenRead = false;
+  if(!senReadIsValid && (readIndex + 1) == NUM_READINGS)
+    senReadIsValid = true;
+    
   printSen = false;
   lastSensorCheck = curTime;
 }
 
+/*
+   If the load should be active based on the state, output control signal to the load to draw set amount of current
+ */
 void updateControl() {
   int temp = controlValue;
-  if (state != ST_RUN) {
-    controlValue = MIN_CONTROL;
+  if (state != ST_RUN && state != ST_QUIT) {
+    controlValue = 0;
   } else {
-    if (mode == CC && value[I_C_CUR] < value[I_S_CUR] ||
-        mode == CP && value[I_C_PWR] < value[I_S_PWR] ) {
+    if (modeIsCP == CC && value[I_C_CUR] < value[I_S_CUR] ||
+        modeIsCP == CP && value[I_C_PWR] < value[I_S_PWR] ) {
       temp += 1;
     } else {
       temp -= 1;
     }
 
+    //don't set new value if the new value is outside of bounds
     if (temp < MAX_CONTROL && temp > MIN_CONTROL) {
       controlValue = temp;
     }
@@ -563,10 +600,10 @@ void printFlash() {
    over write the last written mode with the background colour
 */
 void printMode() {
-  printString(modeStr[displayedMode], MODE_X, MODE_Y, BLACK);
+  printString(modeStr[displayedModeIsCP], MODE_X, MODE_Y, BLACK);
 
-  printString(modeStr[mode], MODE_X, MODE_Y, WHITE);
-  displayedMode = mode;
+  printString(modeStr[modeIsCP], MODE_X, MODE_Y, WHITE);
+  displayedModeIsCP = modeIsCP;
 }
 
 /*
@@ -585,9 +622,9 @@ void initSetupDisplay() {
 
   printMode();
 
-  if (mode == CC) {
+  if (modeIsCP == CC) {
     printValue(I_S_CUR);
-  } else if (mode == CP) {
+  } else if (modeIsCP == CP) {
     printValue(I_S_PWR);
   }
 
@@ -609,9 +646,9 @@ void initVerifyDisplay() {
 
   printMode();
 
-  if (mode == CC) {
+  if (modeIsCP == CC) {
     printValue(I_S_CUR);
-  } else if (mode == CP) {
+  } else if (modeIsCP == CP) {
     printValue(I_S_PWR);
   }
 
@@ -627,23 +664,23 @@ void initVerifyDisplay() {
    Sets some state variables as well as prints the menu's fields
 */
 void initRunDisplay() {
-  viewMode = mode;
+  viewModeIsCP = modeIsCP;
   value[I_C_CHG] = 0;
   value[I_C_NRG] = 0;
-  initialSenRead = true;
+  senReadIsValid = true;
   CLEAR_TEXT_AREA;
 
   updateCursor(CR_QUIT);
 
   printMode();
 
-  if (viewMode == CC) {
+  if (viewModeIsCP == CC) {
     printValue(I_C_CHG);
     printValue(I_S_CUR);
     printValue(I_C_CUR);
   }
 
-  if (viewMode == CP) {
+  if (viewModeIsCP == CP) {
     printValue(I_C_NRG);
     printValue(I_S_PWR);
     printValue(I_C_PWR);
