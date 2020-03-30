@@ -3,17 +3,17 @@
 
 /*PINS USED*/
 #define SDC_PIN_CS 10
-#define TFT_PIN_CS 8
-#define TFT_PIN_DC 7
-#define TFT_PIN_RS 6
+#define TFT_PIN_CS 6
+#define TFT_PIN_RS 7
+#define TFT_PIN_DC 8
 
 #define ENC_PIN_A 2
-#define ENC_PIN_B 5
-#define ENC_PIN_C 3
+#define ENC_PIN_B 3 //encoder button
+#define ENC_PIN_C 4
 
-#define SEN_PIN_VLT A1
-#define SEN_PIN_REF A2
-#define SEN_PIN_CUR A3
+#define SEN_PIN_REF A5
+#define SEN_PIN_VLT A6
+#define SEN_PIN_CUR A7
 
 #define CTL_PIN 9
 
@@ -21,14 +21,14 @@
 #define REF_V 5.0 //reference voltage
 
 //gains for coltage dividers adjust as needed for discrepencies in resistor values
-#define DIV_VLT 6.121 //voltage divider on pin A0 
-#define DIV_REF 6.09//voltage divider on pin A1 compensation factor
+#define DIV_VLT 6.0 //voltage divider on pin A0 
+#define DIV_REF 6.0//voltage divider on pin A1 compensation factor
 
-#define CUR_V 10 //voltage conversion factor for current sensor
+#define CUR_V 10.0 //voltage conversion factor for current sensor
 
 #define CUR_OFFSET (currentSenRef * CUR_V / 2.0) + 0.15 //The voltage that the current sensor outputs at 0A
-#define VLT_OFFSET  0.0592
-#define REF_OFFSET  0.0192
+#define VLT_OFFSET  0.0
+#define REF_OFFSET  0.0
 
 #define ADC_DIV 1023
 
@@ -143,6 +143,7 @@
 
 
 /*OPERATION VALUES*/
+#define VERBOSE false
 #define SENSOR_READOUT false
 
 //Timing periods
@@ -172,3 +173,7 @@
 
 /*MACROS*/
 #define CLEAR_TEXT_AREA tft.fillRect(0, MENU_Y, SCREEN_WIDTH, SCREEN_HEIGHT - MENU_Y, BLACK)
+
+
+/*STRUCTS*/
+//struct  

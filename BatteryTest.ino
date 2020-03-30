@@ -78,6 +78,7 @@ float ox, oy;
 bool redraw;
 
 void setup() {
+  if(VERBOSE)
   Serial.begin(9600);
   
   TCCR1B = TCCR1B & B11111000 | B00000001; // PWM frequency of pin 9 and 10 to 31372.55 Hz
@@ -102,27 +103,32 @@ void setup() {
   pinMode(ENC_PIN_B, INPUT_PULLUP);
   pinMode(ENC_PIN_C, INPUT_PULLUP);
 
-  modeIsCP = CC;
+  modeIsCP = 0;
   
   
   //Initialize interupts
   attachInterrupt(digitalPinToInterrupt(ENC_PIN_A), doEncoder, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENC_PIN_C), doButton, FALLING);
   
-  Serial.println("Initializing SD card...");
+  if(VERBOSE)
+    Serial.println("Initializing SD card...");
   
   if(SD.begin(SDC_PIN_CS)){
+    if(VERBOSE)
     Serial.println("SD card found");
     logFile = SD.open(LOG_PATH, FILE_WRITE);
     if(logFile){
       SDIsValid = true;
-      Serial.println("log opened");
+      if(VERBOSE)
+        Serial.println("log opened");
     } else {
-      Serial.println("log not availible");
+      if(VERBOSE)
+        Serial.println("log not availible");
     }
     logFile.close();
   } else {
-    Serial.println("SD card NOT found");
+    if(VERBOSE)
+      Serial.println("SD card NOT found");
   }
   
   delay(1000);
@@ -137,7 +143,7 @@ void setup() {
   for (x = 0; x <= 6.3; x += .1) {
 
     y = sin(x);
-    //Graph(tft, x, y, GRAPH_X, GRAPH_Y, GRAPH_W, GRAPH_H, 0, 6.5, 2, -1, 1, 0.5, "", "t", "V", DKBLUE, RED, YELLOW, WHITE, BLACK, redraw);
+    Graph(tft, x, y, GRAPH_X, GRAPH_Y, GRAPH_W, GRAPH_H, 0, 6.5, 2, -1, 1, 0.5, "", "t", "V", DKBLUE, RED, YELLOW, WHITE, BLACK, redraw);
 
   }
 
@@ -172,7 +178,7 @@ void loop() {
             break;
           case CR_MODE:
             modeIsCP = !modeIsCP;
-            if (modeIsCP == CC) {
+            if (modeIsCP == 0) {
               updateValue(I_S_CUR, value[I_S_CUR], true);
             } else {
               updateValue(I_S_PWR, value[I_S_PWR], true);
@@ -228,7 +234,7 @@ void loop() {
       if (newEnc) {
         switch (cursorPos) {
           case CR_SET_RATE:
-            if (modeIsCP == CC) {
+            if (modeIsCP == 0) {
               checkVal = value[I_S_CUR] + SET_STEP * encDir; //precalculate new setvalue
               if ((encDir > 0 || checkVal > 0) && (encDir < 0 || checkVal < MAX_CURRENT)) { //if the new set value is outside of the bounds don't set it
                 updateValue(I_S_CUR, checkVal, true);
@@ -285,11 +291,11 @@ void loop() {
       if (newEnc) {
         viewModeIsCP = !viewModeIsCP;
 
-        if (viewModeIsCP == CC) {
+        if (viewModeIsCP == 0) {
           updateValue(I_C_CHG, value[I_C_CHG], true);
           updateValue(I_S_CUR, value[I_S_CUR], true);
           updateValue(I_C_CUR, value[I_C_CUR], true);
-        } else if (viewModeIsCP == CP) {
+        } else if (viewModeIsCP == 1) {
           updateValue(I_C_NRG, value[I_C_NRG], true);
           updateValue(I_S_PWR, value[I_S_PWR], true);
           updateValue(I_C_PWR, value[I_C_PWR], true);
@@ -344,26 +350,14 @@ void loop() {
 */
 void doEncoder() {
   cli();
-  unsigned long curTime, timeDif;
   bool pinState = digitalRead(ENC_PIN_B);
-  curTime = millis();
-  timeDif = curTime - lastEnc;
-  if (timeDif < DEBOUNCE_ENC_T) {
-    if (enEnc) {
-      if (initEncState != pinState) {
-        Serial.print("ENC UPDATE");
-        newEnc = true;
-        encDir = initEncState ? -1 : 1;
-        enEnc = false;
-      }
-    }
+  
+  if(VERBOSE)
+    Serial.print("ENC UPDATE");
+    
+  newEnc = true;
+  encDir = pinState ? -1 : 1;
 
-  } else {
-    initEncState = pinState;
-    enEnc = true;
-  }
-
-  lastEnc = curTime;
   sei();
 }
 
@@ -372,13 +366,7 @@ void doEncoder() {
 */
 void doButton() {
   cli();
-  unsigned long curTime;
-  curTime = millis();
-
-  if (curTime > lastBtn + DEBOUNCE_BTN_T) {
-    newBtn = true;
-    lastBtn = curTime;
-  }
+  newBtn = true;
   sei();
 }
 
@@ -406,7 +394,6 @@ void checkTime() {
     lastSensorPrint = curTime;
     printSen = true;
   }
-
 }
 
 /*
@@ -430,8 +417,8 @@ void checkSensors() {
   double readCurrent;
 
   bool doPrintVoltage = printSen && state < NUM_ST && state != ST_QUIT;
-  bool doPrintCurrent = printSen && state == ST_RUN && viewModeIsCP == CC;
-  bool doPrintPower = printSen && state == ST_RUN && viewModeIsCP == CP;
+  bool doPrintCurrent = printSen && state == ST_RUN && viewModeIsCP == 0;
+  bool doPrintPower = printSen && state == ST_RUN && viewModeIsCP == 1;
 
   curTotal -= curReading[readIndex];
   vltTotal -= vltReading[readIndex];
@@ -459,7 +446,7 @@ void checkSensors() {
   updateValue(I_C_VLT, readVoltage, doPrintVoltage);
   updateValue(I_C_PWR, readVoltage * readCurrent, doPrintPower);
 
-  if (SENSOR_READOUT) {
+  if (SENSOR_READOUT) { //compiles to 252B
     Serial.print(readVoltage, 4);
     Serial.print(", ");
     Serial.print(currentSenRef, 4);
@@ -480,13 +467,13 @@ void checkSensors() {
     if(SDIsValid){
       logFile = SD.open(LOG_PATH, FILE_WRITE);
   
-      Serial.print(readVoltage, 4);
-      Serial.print(", ");
-      Serial.print(currentSenRef, 4);
-      Serial.print(", ");
-      Serial.print(value[I_C_CHG], 4);
-      Serial.print(", ");
-      Serial.println(value[I_C_NRG], 4);
+      logFile.print(readVoltage, 4);
+      logFile.print(", ");
+      logFile.print(currentSenRef, 4);
+      logFile.print(", ");
+      logFile.print(value[I_C_CHG], 4);
+      logFile.print(", ");
+      logFile.println(value[I_C_NRG], 4);
       
       logFile.close();
     }
@@ -507,8 +494,8 @@ void updateControl() {
   if (state != ST_RUN && state != ST_QUIT) {
     controlValue = 0;
   } else {
-    if (modeIsCP == CC && value[I_C_CUR] < value[I_S_CUR] ||
-        modeIsCP == CP && value[I_C_PWR] < value[I_S_PWR] ) {
+    if (modeIsCP == 0 && value[I_C_CUR] < value[I_S_CUR] ||
+        modeIsCP == 1 && value[I_C_PWR] < value[I_S_PWR] ) {
       temp += 1;
     } else {
       temp -= 1;
@@ -622,9 +609,9 @@ void initSetupDisplay() {
 
   printMode();
 
-  if (modeIsCP == CC) {
+  if (modeIsCP == 0) {
     printValue(I_S_CUR);
-  } else if (modeIsCP == CP) {
+  } else if (modeIsCP == 1) {
     printValue(I_S_PWR);
   }
 
@@ -646,9 +633,9 @@ void initVerifyDisplay() {
 
   printMode();
 
-  if (modeIsCP == CC) {
+  if (modeIsCP == 0) {
     printValue(I_S_CUR);
-  } else if (modeIsCP == CP) {
+  } else if (modeIsCP == 1) {
     printValue(I_S_PWR);
   }
 
@@ -674,13 +661,13 @@ void initRunDisplay() {
 
   printMode();
 
-  if (viewModeIsCP == CC) {
+  if (viewModeIsCP == 0) {
     printValue(I_C_CHG);
     printValue(I_S_CUR);
     printValue(I_C_CUR);
   }
 
-  if (viewModeIsCP == CP) {
+  if (viewModeIsCP == 1) {
     printValue(I_C_NRG);
     printValue(I_S_PWR);
     printValue(I_C_PWR);
