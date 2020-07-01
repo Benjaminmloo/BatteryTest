@@ -23,13 +23,15 @@ TimeBasedGraph::TimeBasedGraph(
 
   }
 
-void TimeBasedGraph::drawGraphGrid() {
+void TimeBasedGraph::drawGrid() {
   int i;
   float temp;
 
   //value between grid lines
   float incSizeT = _domain / _numIncT;
   float incSizeY = _range / _numIncY;
+
+  CLEAR_GRAPH_AREA;
 
   _graphIndex = 0;
 
@@ -77,7 +79,7 @@ void TimeBasedGraph::drawGraphGrid() {
   _d.println(_ylabel);
 }
 
-void TimeBasedGraph::drawGraphValue(float x, float y) {
+void TimeBasedGraph::drawValue(float x, float y) {
   if(floatToGraphPos(x, _minT, _domain, _GRAPH_W, _GRAPH_X) >= _graphIndex + _GRAPH_X) {
     _graphStore[_graphIndex] = floatToGraphPos(-y, _minY, _range, _GRAPH_H, _GRAPH_Y);
 

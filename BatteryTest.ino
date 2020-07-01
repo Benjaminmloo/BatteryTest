@@ -30,7 +30,7 @@ volatile bool enBtn;
 byte state;
 byte cursorPos;
 
-float controlValue;
+float controlDuty;
 
 bool modeIsCP;
 bool viewModeIsCP; // mode being viewed on run
@@ -47,17 +47,22 @@ char modeStr[][3] = {"CC", "CP"};
 int cursorX[] = { -20, 0, 0, 0, 0, TEXT_W * 5};
 int cursorY[] = { -20, MENU_Y, MENU_Y + TEXT_H, MENU_Y + TEXT_H * 2, MENU_Y + TEXT_H * 3, MENU_Y + TEXT_H * 3};
 
+//the raw number from adc
+int curRawValue;
+int vltRawValue;
+int refRawValue;
 
-//rolling average array for smoothing sensor values
-int curWindow[NUM_READINGS];
-int vltWindow[NUM_READINGS];
-int refWindow[NUM_READINGS];
 
-int curTotal;
-int vltTotal;
-int refTotal;
+//adjusted to be human readable
+float curReadable;
+float vltReadable;
+float refReadable;
 
-int readIndex;
+//values averaged for steadier reading of noisy ADC
+float curAveraged;
+float vltAveraged;
+float refAveraged;
+
 
 //Values
 float value[NUM_VALUES]; //storage for values referenced with indexes defined in header
@@ -75,18 +80,14 @@ int fieldY[] = { MENU_Y, MENU_Y + TEXT_H, MENU_Y + TEXT_H * 2, MENU_Y + TEXT_H, 
 unsigned long lastCursorFlash;
 unsigned long lastSensorPrint;
 unsigned long lastSensorCheck;
+unsigned long startTime;
 bool printSen;
 
-//Graphing variables
-
-//stores values previously printed to the screen
-int graphStore[GRAPH_W];
-int graphIndex = 0;
 
 void setup() {
   File logFile;
 
-  if (VERBOSE || SENSOR_READOUT)
+  if (VERBOSE)
     Serial.begin(9600);
 
 
@@ -153,19 +154,9 @@ void setup() {
 
   enBtn = 0;
 
-  graphIndex = 0;
+  graph.drawGrid();
 
-  float t;
-  float v;
-  graph.drawGraphGrid();
-  for(t = 0; t <= 60; t += 0.1){
-    v = 5 * sin(2 * PI * t / 60) + 5;
-    graph.drawGraphValue(t, v);
-  }
-
-  readIndex = 0;
-
-  delay(1000);
+  delay(500);
 
   initSetupDisplay();
 }
@@ -348,9 +339,6 @@ void loop() {
   checkTime();
   checkSensors();
   updateControl();
-
-  if (SENSOR_READOUT)
-    Serial.print('\n');
 }
 
 
@@ -437,46 +425,30 @@ void checkSensors() {
 
   File logFile;
 
-  curTotal -= curWindow[readIndex];
-  vltTotal -= vltWindow[readIndex];
-  refTotal -= refWindow[readIndex];
-
   delay(5);
-  curWindow[readIndex] = analogRead(SEN_PIN_CUR);
+  curRawValue = analogRead(SEN_PIN_CUR);
   delay(50);
-  vltWindow[readIndex] = analogRead(SEN_PIN_VLT);
-  delay(50);
-  refWindow[readIndex] = analogRead(SEN_PIN_REF);
+  vltRawValue = analogRead(SEN_PIN_VLT);
+  //delay(50);
+  //refRawValue = analogRead(SEN_PIN_REF);
 
-  curTotal += curWindow[readIndex];
-  vltTotal += vltWindow[readIndex];
-  refTotal += refWindow[readIndex];
+  curReadable = curRawValue * SEN_GAIN_CUR + CUR_OFFSET;
+  vltReadable = vltRawValue * SEN_GAIN_VLT + VLT_OFFSET;
+  //refReadable = refTotal * SEN_GAIN_REF + REF_OFFSET;
 
-  readIndex = (readIndex + 1) % NUM_READINGS;
 
-  currentSenRef = (refTotal / NUM_READINGS) * SEN_GAIN_REF + REF_OFFSET;
-  readCurrent = (curTotal / NUM_READINGS) * SEN_GAIN_CUR + CUR_OFFSET;
-  readVoltage = (vltTotal / NUM_READINGS) * SEN_GAIN_VLT + VLT_OFFSET;
+  curAveraged = curAveraged * (1 - NEW_VALUE_WEIGHT) + curReadable * NEW_VALUE_WEIGHT;
+  vltAveraged = vltAveraged * (1 - NEW_VALUE_WEIGHT) + vltReadable * NEW_VALUE_WEIGHT;
 
-  updateValue(I_C_CUR, readCurrent, doPrintCurrent);
-  updateValue(I_C_VLT, readVoltage, doPrintVoltage);
+  updateValue(I_C_CUR, curAveraged, doPrintCurrent);
+  updateValue(I_C_VLT, vltAveraged, doPrintVoltage);
   updateValue(I_C_PWR, readVoltage * readCurrent, doPrintPower);
 
   dataString += Serial.print(readVoltage, 4);
-  if (SENSOR_READOUT) { //compiles to 252B
-    Serial.print(", ");
-    Serial.print(currentSenRef, 4);
-    Serial.print(", ");
-    Serial.print((curTotal / NUM_READINGS) * SEN_GAIN_CUR);
-    Serial.print(", ");
-    Serial.print(CUR_OFFSET);
-    Serial.print(", ");
-    Serial.print(readCurrent);
-    Serial.print(", ");
-  }
 
+  graph.drawValue((curTime - startTime) / 1000000, vltAveraged);
 
-  if (senReadIsValid && (state == ST_RUN || state == ST_QUIT)) {
+  if (state == ST_RUN || state == ST_QUIT) {
     value[I_C_CHG] += value[I_C_CUR] * timeDif * H_PER_uS;
     value[I_C_NRG] += value[I_C_PWR] * timeDif * H_PER_uS;
 
@@ -485,14 +457,16 @@ void checkSensors() {
       if(logFile){
         if(VERBOSE)
           Serial.println("WRITING TO SD");
-        logFile.print(readVoltage, 4);
-        logFile.print(", ");
-        logFile.print(currentSenRef, 4);
-        logFile.print(", ");
-        logFile.print(value[I_C_CHG], 4);
-        logFile.print(", ");
-        logFile.println(value[I_C_NRG], 4);
-
+        dataString += String(curTime);
+        dataString += ",";
+        dataString += String(vltAveraged, 4);
+        dataString += ",";
+        dataString += String(curAveraged, 4);
+        dataString += ",";
+        dataString += String(readVoltage * readCurrent, 4);
+        dataString += ",";
+        dataString += String(controlDuty);
+        logFile.println(dataString);
         logFile.close();
       }else{
         if(VERBOSE)
@@ -500,9 +474,6 @@ void checkSensors() {
       }
     }
   }
-
-  if (!senReadIsValid && (readIndex + 1) == NUM_READINGS)
-    senReadIsValid = true;
 
   printSen = false;
   lastSensorCheck = curTime;
@@ -512,9 +483,9 @@ void checkSensors() {
    If the load should be active based on the state, output control signal to the load to draw set amount of current
 */
 void updateControl() {
-  float temp = controlValue;
+  float temp = controlDuty;
   if (state != ST_RUN && state != ST_QUIT) {
-    controlValue = 0;
+    controlDuty = 0;
   } else {
     if (modeIsCP == 0 && value[I_C_CUR] < value[I_S_CUR] ||
         modeIsCP == 1 && value[I_C_PWR] < value[I_S_PWR] ) {
@@ -525,18 +496,11 @@ void updateControl() {
 
     //don't set new value if the new value is outside of bounds
     if (temp < MAX_CONTROL && temp > MIN_CONTROL) {
-      controlValue = temp;
+      controlDuty = temp;
     }
   }
 
-
-
-  analogWrite(CTL_PIN, (byte) controlValue);
-
-  if (SENSOR_READOUT) {
-    Serial.print(controlValue);
-    Serial.print(", ");
-  }
+  analogWrite(CTL_PIN, (byte) controlDuty);
 }
 
 /*
@@ -676,6 +640,7 @@ void initRunDisplay() {
   viewModeIsCP = modeIsCP;
   value[I_C_CHG] = 0;
   value[I_C_NRG] = 0;
+  startTime = micros();
   senReadIsValid = true;
   CLEAR_TEXT_AREA;
 
@@ -683,13 +648,11 @@ void initRunDisplay() {
 
   printMode();
 
-  if (viewModeIsCP == 0) {
+  if (!viewModeIsCP) {
     printValue(I_C_CHG);
     printValue(I_S_CUR);
     printValue(I_C_CUR);
-  }
-
-  if (viewModeIsCP == 1) {
+  }else{
     printValue(I_C_NRG);
     printValue(I_S_PWR);
     printValue(I_C_PWR);

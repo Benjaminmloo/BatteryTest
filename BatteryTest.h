@@ -33,6 +33,8 @@
 
 #define ADC_DIV 1023
 
+#define NEW_VALUE_WEIGHT 0.1
+
 #define SEN_GAIN_VLT ((REF_V * DIV_VLT) / ADC_DIV)//range of supply / (range of analog read * max int value)
 #define SEN_GAIN_REF ((REF_V * DIV_REF) / ADC_DIV)
 #define SEN_GAIN_CUR ((REF_V * CUR_V) / ADC_DIV)
@@ -139,10 +141,11 @@
 #define CR_QUIT CR_START
 
 //Value array
+//set
 #define I_S_CUR 0
 #define I_S_COV 1
 #define I_S_PWR 2
-
+//current
 #define I_C_CUR 3
 #define I_C_VLT 4
 #define I_C_PWR 5
@@ -151,13 +154,11 @@
 #define I_C_NRG 7 //energy
 
 #define NUM_VALUES 9
-#define NUM_READINGS 5
 #define NUM_FIELDS 5
 
 
 /*OPERATION VALUES*/
 #define VERBOSE false
-#define SENSOR_READOUT false
 #define USE_SD true
 
 //Bus control states
