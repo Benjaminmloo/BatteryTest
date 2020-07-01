@@ -2,10 +2,11 @@
 #define VER "0.1"
 
 /*PINS USED*/
-#define SDC_PIN_CS 10
-#define TFT_PIN_CS 6
+#define SDC_PIN_CS 6
+#define TFT_PIN_CS 10
 #define TFT_PIN_RS 7
 #define TFT_PIN_DC 8
+#define BUS_PIN_DR A0
 
 #define ENC_PIN_A 2
 #define ENC_PIN_B 3 //encoder button
@@ -21,12 +22,12 @@
 #define REF_V 5.0 //reference voltage
 
 //gains for coltage dividers adjust as needed for discrepencies in resistor values
-#define DIV_VLT 6.0 //voltage divider on pin A0 
+#define DIV_VLT 6.0 //voltage divider on pin A0
 #define DIV_REF 6.0//voltage divider on pin A1 compensation factor
 
 #define CUR_V 10.0 //voltage conversion factor for current sensor
 
-#define CUR_OFFSET (currentSenRef * CUR_V / 2.0) + 0.15 //The voltage that the current sensor outputs at 0A
+#define CUR_OFFSET -1 * (REF_V * CUR_V / 2.0) //The voltage that the current sensor outputs at 0A
 #define VLT_OFFSET  0.0
 #define REF_OFFSET  0.0
 
@@ -34,13 +35,13 @@
 
 #define SEN_GAIN_VLT ((REF_V * DIV_VLT) / ADC_DIV)//range of supply / (range of analog read * max int value)
 #define SEN_GAIN_REF ((REF_V * DIV_REF) / ADC_DIV)
-#define SEN_GAIN_CUR -1 * ((REF_V * CUR_V) / ADC_DIV)
+#define SEN_GAIN_CUR ((REF_V * CUR_V) / ADC_DIV)
 
 #define H_PER_uS 2.777777777E-10
 
 /*SCREEN VALUES*/
-#define SCREEN_WIDTH 160 // tft display width, in pixels
-#define SCREEN_HEIGHT 128 // tft display height, in pixels
+#define SCREEN_WIDTH 320 // tft display width, in pixels
+#define SCREEN_HEIGHT 240 // tft display height, in pixels
 #if SCREEN_WIDTH <= 160
   #define TEXT_SIZE 1
   #define TEXT_W 6
@@ -57,9 +58,21 @@
 #define MODE_Y MENU_Y
 
 #define GRAPH_X 40
-#define GRAPH_Y MENU_Y - 20
-#define GRAPH_W SCREEN_WIDTH - 50
-#define GRAPH_H MENU_Y - 35
+#define GRAPH_Y (MENU_Y - 20)
+#define GRAPH_W (SCREEN_WIDTH - (GRAPH_X + 10))
+#define GRAPH_H (GRAPH_Y - 15)
+
+#define INIT_MAX_T 60
+#define NUM_INC_T 4
+#define INIT_MIN_Y 0
+#define INIT_RANGE 10
+#define NUM_INC_Y 5
+
+#define GRID_COLOUR DKBLUE
+#define AXIS_COLOUR RED
+#define POINT_COLOUR YELLOW
+#define BACK_COLOUR BLACK
+#define TEXT_COLOUR WHITE
 
 //16bit colour values
 #define LTBLUE    0xB6DF
@@ -108,9 +121,9 @@
 
 //States
 #define ST_SETUP 0
-#define ST_SET 1
-#define ST_VERIFY 2
-#define ST_RUN 3
+#define ST_SET 1  //Generic state to set previously selected value
+#define ST_VERIFY 2 // asks user to verify settings
+#define ST_RUN 3 //Device is actively controlling the variable load
 #define ST_QUIT 4
 
 #define NUM_ST 5
@@ -145,6 +158,11 @@
 /*OPERATION VALUES*/
 #define VERBOSE false
 #define SENSOR_READOUT false
+#define USE_SD true
+
+//Bus control states
+#define BUS_WR LOW
+#define BUS_RD HIGH
 
 //Timing periods
 #define CR_FLASH_T 100
@@ -156,7 +174,7 @@
 #define MAX_CURRENT 9.0
 #define MIN_CURRENT 0.0
 
-#define MAX_CONTROL 160
+#define MAX_CONTROL 255
 #define MIN_CONTROL 0
 
 #define SET_STEP  0.1
@@ -169,11 +187,11 @@
 #define FLD_STR_L 8
 #define POSTFIX_L 3
 
-#define LOG_PATH "batterylog.txt"
+#define LOG_PATH "batt_log.txt"
 
 /*MACROS*/
 #define CLEAR_TEXT_AREA tft.fillRect(0, MENU_Y, SCREEN_WIDTH, SCREEN_HEIGHT - MENU_Y, BLACK)
 
 
 /*STRUCTS*/
-//struct  
+//struct
