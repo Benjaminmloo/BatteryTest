@@ -1,15 +1,17 @@
-#ifndef TimeBasedGraph_h
-#define TimeBasedGraph_h
+#ifndef TimeSeriesGraph_h
+#define TimeSeriesGraph_h
 
 #include "Arduino.h"
 
 #define CLEAR_GRAPH_AREA _d.fillRect(0, 0, _GRAPH_X + _GRAPH_W, _GRAPH_Y + 20, _BACK_COLOUR)
 
-//template used bc it initialises the size of the
-//allowing for screens of diferent sizes
-class TimeBasedGraph{
+/*
+  time series
+*/
+
+class TimeSeriesGraph{
   public:
-    TimeBasedGraph(
+    TimeSeriesGraph(
       Adafruit_ILI9341 &d,
       float maxT, int numIncT,
       float minY, float range, int numIncY, String ylabel,
@@ -18,8 +20,11 @@ class TimeBasedGraph{
       uint16_t pointColour, uint16_t backColour,
       uint16_t textColour);
 
+    void extendDomain (float newDomain);
+
     void drawGrid();
     void drawValue(float x, float y);
+    void reset();
 
   private:
     Adafruit_ILI9341 &_d;

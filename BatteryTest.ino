@@ -2,11 +2,11 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_ILI9341.h>
 #include "BatteryTest.h"
-#include "TimeBasedGraph.h"
+#include "TimeSeriesGraph.h"
 
 //object definitions
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_PIN_CS, TFT_PIN_DC);
-TimeBasedGraph graph(
+TimeSeriesGraph graph(
   tft,
   INIT_MAX_T, NUM_INC_T,
   INIT_MIN_Y, INIT_RANGE, NUM_INC_Y, "V",
@@ -22,20 +22,17 @@ volatile int encDir;
 volatile bool newEnc;
 volatile bool newBtn;
 
-//enables for inputs
-volatile bool enEnc;
-volatile bool enBtn;
-
 //State Variables
 byte state;
 byte cursorPos;
 
 float controlDuty;
+float targetCur;
+float prevError;
 
 bool modeIsCP;
 bool viewModeIsCP; // mode being viewed on run
 bool displayedModeIsCP; //last mode displayed on screen
-bool senReadIsValid;  //needed to indicate when the sensor value buffers are full
 bool showCursor; //whether or not the cursor should be shown
 bool initEncState;//the first reading of the non-interupt pin after set period
 bool SDIsValid = false; //Fully functioning SD card
@@ -81,14 +78,16 @@ unsigned long lastCursorFlash;
 unsigned long lastSensorPrint;
 unsigned long lastSensorCheck;
 unsigned long startTime;
+unsigned long timeDiff;
 bool printSen;
 
 
 void setup() {
   File logFile;
 
-  if (VERBOSE)
+  #if defined(VERBOSE) || defined(DEBUG_PID)
     Serial.begin(9600);
+  #endif
 
 
   // set bus direction
@@ -98,7 +97,7 @@ void setup() {
 
   TCCR1B = TCCR1B & B11111000 | B00000001; // PWM frequency of pin 9 and 10 to 31372.55 Hz
 
-  tft.begin();      // Init ST7735S chip, black tab
+  tft.begin();
 
   tft.setRotation(3);
   tft.setTextWrap(false);
@@ -107,7 +106,7 @@ void setup() {
   tft.setTextSize(TEXT_SIZE);
   tft.fillScreen(BLACK);
 
-  printFlash();
+  //printFlash();
 
   //initiallize timers
   lastCursorFlash = 0;
@@ -115,6 +114,10 @@ void setup() {
   pinMode(ENC_PIN_A, INPUT);
   pinMode(ENC_PIN_B, INPUT);
   pinMode(ENC_PIN_C, INPUT);
+
+  pinMode(SEN_PIN_REF, INPUT);
+  pinMode(SEN_PIN_VLT, INPUT);
+  pinMode(SEN_PIN_CUR, INPUT);
 
 
   modeIsCP = 0;
@@ -126,37 +129,39 @@ void setup() {
 
 
   //intialize sd card
-  if (VERBOSE)
+  #ifdef VERBOSE
     Serial.println("Initializing SD card...");
+  #endif
 
-  if (USE_SD && SD.begin(SDC_PIN_CS)) {
-    if (VERBOSE)
+  #ifdef USE_SD
+  if (SD.begin(SDC_PIN_CS)) {
+    #ifdef VERBOSE
       Serial.println("SD card found");
+    #endif
     logFile = SD.open(LOG_PATH, FILE_WRITE);
     if (logFile) {
       SDIsValid = true;
       logFile.close();
-      if (VERBOSE)
+      #ifdef VERBOSE
         Serial.println("log opened");
+      #endif
     } else {
-      if (VERBOSE)
+      #ifdef VERBOSE
         Serial.println("log not availible");
+      #endif
     }
   } else {
-    if (VERBOSE)
-      Serial.println("SD card NOT found");
+    #ifdef VERBOSE
+      Serial.println("Initializing SD card");
+    #endif
   }
+  #endif
 
-  delay(1000);
   //init interupt flags
   newEnc = 0;
   newBtn = 0;
 
-  enBtn = 0;
-
   graph.drawGrid();
-
-  delay(500);
 
   initSetupDisplay();
 }
@@ -271,6 +276,7 @@ void loop() {
       if (newBtn) {
         if (cursorPos == CR_YES) {
           state = ST_RUN;
+          initNewTest();
           initRunDisplay();
         } else if (cursorPos == CR_NO) {
           state = ST_SETUP;
@@ -294,6 +300,11 @@ void loop() {
         state = ST_QUIT;
 
         initQuitDisplay();
+      }
+
+      if(value[I_S_COV] > value[I_C_VLT]){
+        state = ST_SETUP;
+        initSetupDisplay();
       }
 
       if (newEnc) {
@@ -354,22 +365,17 @@ void loop() {
    until the next interupt that takes longer than the set DEBOUNCE_ENC_T
 */
 void doEncoder() {
-  cli();
   bool pinState = digitalRead(ENC_PIN_C);
 
   newEnc = true;
   encDir = pinState ? -1 : 1;
-
-  sei();
 }
 
 /*
    Button interupt handeler
 */
 void doButton() {
-  cli();
   newBtn = true;
-  sei();
 }
 
 /*
@@ -415,9 +421,7 @@ void checkTime() {
 void checkSensors() {
   String dataString = "";
   unsigned long curTime = micros();
-  unsigned long timeDif = curTime - lastSensorCheck;
-  float readVoltage;
-  float readCurrent;
+  timeDiff = curTime - lastSensorCheck;
 
   bool doPrintVoltage = printSen && state < NUM_ST && state != ST_QUIT;
   bool doPrintCurrent = printSen && state == ST_RUN && viewModeIsCP == 0;
@@ -436,43 +440,43 @@ void checkSensors() {
   vltReadable = vltRawValue * SEN_GAIN_VLT + VLT_OFFSET;
   //refReadable = refTotal * SEN_GAIN_REF + REF_OFFSET;
 
-
   curAveraged = curAveraged * (1 - NEW_VALUE_WEIGHT) + curReadable * NEW_VALUE_WEIGHT;
   vltAveraged = vltAveraged * (1 - NEW_VALUE_WEIGHT) + vltReadable * NEW_VALUE_WEIGHT;
 
   updateValue(I_C_CUR, curAveraged, doPrintCurrent);
   updateValue(I_C_VLT, vltAveraged, doPrintVoltage);
-  updateValue(I_C_PWR, readVoltage * readCurrent, doPrintPower);
+  updateValue(I_C_PWR, curAveraged * vltAveraged, doPrintPower);
 
-  dataString += Serial.print(readVoltage, 4);
 
-  graph.drawValue((curTime - startTime) / 1000000, vltAveraged);
+  if(!modeIsCP){
+    targetCur = value[I_S_CUR];
+  } else {
+    targetCur = value[I_S_PWR] / value[I_C_VLT];
+  }
 
   if (state == ST_RUN || state == ST_QUIT) {
-    value[I_C_CHG] += value[I_C_CUR] * timeDif * H_PER_uS;
-    value[I_C_NRG] += value[I_C_PWR] * timeDif * H_PER_uS;
+    graph.drawValue((curTime - startTime) / 1000000, vltAveraged);
 
-    if (USE_SD && SDIsValid) {
+    value[I_C_CHG] += value[I_C_CUR] * timeDiff * H_PER_uS;
+    value[I_C_NRG] += value[I_C_PWR] * timeDiff * H_PER_uS;
+
+    #ifdef USE_SD
+    if (SDIsValid) {
       logFile = SD.open(LOG_PATH, FILE_WRITE);
       if(logFile){
-        if(VERBOSE)
-          Serial.println("WRITING TO SD");
+        #ifdef VERBOSE
+          Serial.println("writing to SD");
+        #endif
         dataString += String(curTime);
         dataString += ",";
         dataString += String(vltAveraged, 4);
         dataString += ",";
         dataString += String(curAveraged, 4);
-        dataString += ",";
-        dataString += String(readVoltage * readCurrent, 4);
-        dataString += ",";
-        dataString += String(controlDuty);
         logFile.println(dataString);
         logFile.close();
-      }else{
-        if(VERBOSE)
-          Serial.println("FAILED TO REOPEN SD");
       }
     }
+    #endif
   }
 
   printSen = false;
@@ -483,24 +487,53 @@ void checkSensors() {
    If the load should be active based on the state, output control signal to the load to draw set amount of current
 */
 void updateControl() {
+  int i;
   float temp = controlDuty;
+  float error = targetCur - value[I_C_CUR];
+
   if (state != ST_RUN && state != ST_QUIT) {
     controlDuty = 0;
   } else {
-    if (modeIsCP == 0 && value[I_C_CUR] < value[I_S_CUR] ||
-        modeIsCP == 1 && value[I_C_PWR] < value[I_S_PWR] ) {
-      temp += 0.25;
-    } else {
-      temp -= 0.25;
-    }
+
+
+    temp += CTL_P * error + CTL_D * (prevError - error) / timeDiff;
+
+    #ifdef VERBOSE
+    Serial.print(lastSensorCheck);
+    Serial.print(", ");
+    Serial.print(timeDiff);
+    Serial.print(", ");
+    Serial.print(error, 5);
+    Serial.print(", ");
+    Serial.print(prevError, 5);
+    Serial.print(", ");
+    #endif
+    #ifdef DEBUG_PID
+    Serial.print(CTL_P * error, 5);
+    Serial.print(", ");
+    Serial.print(CTL_D * (prevError - error) / timeDiff, 5);
+    Serial.print(", ");
+    Serial.print(CTL_P * error + CTL_D * (prevError - error) / timeDiff, 5);
+    Serial.print(", ");
+    #endif
+
+
+    #if defined(VERBOSE) || defined(DEBUG_PID)
+    Serial.println(temp, 5);
+    #endif
 
     //don't set new value if the new value is outside of bounds
-    if (temp < MAX_CONTROL && temp > MIN_CONTROL) {
+    if (temp < MIN_CONTROL) {
+      controlDuty = MIN_CONTROL;
+    } else if(temp > MAX_CONTROL){
+      controlDuty = MAX_CONTROL;
+    }else{
       controlDuty = temp;
     }
   }
 
   analogWrite(CTL_PIN, (byte) controlDuty);
+  prevError = prevError * (1 - CTL_AVG_WGT)  + error * CTL_AVG_WGT;
 }
 
 /*
@@ -634,14 +667,11 @@ void initVerifyDisplay() {
 /*
    Initialises the run screen
 
-   Sets some state variables as well as prints the menu's fields
+   Sets some state variables in preperation for starting as well as prints the menu's fields
 */
 void initRunDisplay() {
   viewModeIsCP = modeIsCP;
-  value[I_C_CHG] = 0;
-  value[I_C_NRG] = 0;
-  startTime = micros();
-  senReadIsValid = true;
+
   CLEAR_TEXT_AREA;
 
   updateCursor(CR_QUIT);
@@ -662,6 +692,16 @@ void initRunDisplay() {
   printValue(I_C_VLT);
 
   printString("STOP", TEXT_W * 2, MENU_Y + TEXT_H * 3, TEXT_COLOUR);
+}
+
+/*
+   Initialises variables for a new test
+
+*/
+void initNewTest(){
+  value[I_C_CHG] = 0;
+  value[I_C_NRG] = 0;
+  startTime = micros();
 }
 
 /*

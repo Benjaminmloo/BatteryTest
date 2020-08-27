@@ -1,5 +1,5 @@
 
-#define VER "0.1"
+#define VER "1.0"
 
 /*PINS USED*/
 #define SDC_PIN_CS 6
@@ -18,6 +18,45 @@
 
 #define CTL_PIN 9
 
+#define CTL_P 15
+#define CTL_D -5000000
+#define CTL_AVG_WGT 0.5
+
+
+/*OPERATION VALUES*/
+//#define VERBOSE
+//#define USE_SD
+//#define DEBUG_PID
+
+//Bus control states
+#define BUS_WR LOW
+#define BUS_RD HIGH
+
+//Timing periods
+#define CR_FLASH_T 100
+#define DEBOUNCE_BTN_T 200
+#define DEBOUNCE_ENC_T 45
+#define SENSOR_PRINT_T 500
+
+//Boundry values
+#define MAX_CURRENT 9.0
+#define MIN_CURRENT 0.0
+
+#define MAX_CONTROL 255
+#define MIN_CONTROL 0
+
+#define SET_STEP  0.1
+
+
+//Print values
+#define FLOAT_PREC 2
+#define FLOAT_MIN_L 5
+
+#define FLD_STR_L 8
+#define POSTFIX_L 3
+
+#define LOG_PATH "batt_log.txt"
+
 /*SENSOR GAIN & OFFSETS*/
 #define REF_V 5.0 //reference voltage
 
@@ -27,17 +66,18 @@
 
 #define CUR_V 10.0 //voltage conversion factor for current sensor
 
-#define CUR_OFFSET -1 * (REF_V * CUR_V / 2.0) //The voltage that the current sensor outputs at 0A
-#define VLT_OFFSET  0.0
+#define CUR_OFFSET -15.8032732 //The voltage that the current sensor outputs at 0A
+#define VLT_OFFSET  0.0763466
 #define REF_OFFSET  0.0
 
 #define ADC_DIV 1023
 
-#define NEW_VALUE_WEIGHT 0.1
-
-#define SEN_GAIN_VLT ((REF_V * DIV_VLT) / ADC_DIV)//range of supply / (range of analog read * max int value)
+#define SEN_GAIN_VLT 0.0287624 //range of supply / (range of analog read * max int value)
 #define SEN_GAIN_REF ((REF_V * DIV_REF) / ADC_DIV)
-#define SEN_GAIN_CUR ((REF_V * CUR_V) / ADC_DIV)
+#define SEN_GAIN_CUR 0.0310473
+
+
+#define NEW_VALUE_WEIGHT 0.1
 
 #define H_PER_uS 2.777777777E-10
 
@@ -143,7 +183,7 @@
 //Value array
 //set
 #define I_S_CUR 0
-#define I_S_COV 1
+#define I_S_COV 1 //cut off voltage
 #define I_S_PWR 2
 //current
 #define I_C_CUR 3
@@ -155,40 +195,6 @@
 
 #define NUM_VALUES 9
 #define NUM_FIELDS 5
-
-
-/*OPERATION VALUES*/
-#define VERBOSE false
-#define USE_SD true
-
-//Bus control states
-#define BUS_WR LOW
-#define BUS_RD HIGH
-
-//Timing periods
-#define CR_FLASH_T 100
-#define DEBOUNCE_BTN_T 200
-#define DEBOUNCE_ENC_T 45
-#define SENSOR_PRINT_T 500
-
-//Boundry values
-#define MAX_CURRENT 9.0
-#define MIN_CURRENT 0.0
-
-#define MAX_CONTROL 255
-#define MIN_CONTROL 0
-
-#define SET_STEP  0.1
-
-
-//Print values
-#define FLOAT_PREC 2
-#define FLOAT_MIN_L 5
-
-#define FLD_STR_L 8
-#define POSTFIX_L 3
-
-#define LOG_PATH "batt_log.txt"
 
 /*MACROS*/
 #define CLEAR_TEXT_AREA tft.fillRect(0, MENU_Y, SCREEN_WIDTH, SCREEN_HEIGHT - MENU_Y, BLACK)

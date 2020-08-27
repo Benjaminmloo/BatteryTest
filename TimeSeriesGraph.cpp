@@ -1,10 +1,10 @@
 #include "Arduino.h"
 #include <Adafruit_GFX.h>
 #include <Adafruit_ILI9341.h>
-#include "TimeBasedGraph.h"
+#include "TimeSeriesGraph.h"
 
 //TODO: if time exceeds present max add 1 minute to bottom axis
-TimeBasedGraph::TimeBasedGraph(
+TimeSeriesGraph::TimeSeriesGraph(
   Adafruit_ILI9341 &d,
   float maxT, int numIncT,
   float minY, float range, int numIncY, String ylabel,
@@ -20,10 +20,11 @@ TimeBasedGraph::TimeBasedGraph(
   _POINT_COLOUR(pointColour), _BACK_COLOUR(backColour),
   _TEXT_COLOUR(textColour){
     _graphStore = new int[_GRAPH_W];
+    _graphIndex = 0;
 
   }
 
-void TimeBasedGraph::drawGrid() {
+void TimeSeriesGraph::drawGrid() {
   int i;
   float temp;
 
@@ -33,9 +34,8 @@ void TimeBasedGraph::drawGrid() {
 
   CLEAR_GRAPH_AREA;
 
-  _graphIndex = 0;
+  _d.fillRect(0, 0, _GRAPH_X + _GRAPH_W, _GRAPH_Y, _BACK_COLOUR);
 
-  //TODO: draw a black rectangle around everything
   _d.setTextSize(1);
   _d.setTextColor(_TEXT_COLOUR, _BACK_COLOUR);
 
@@ -79,7 +79,10 @@ void TimeBasedGraph::drawGrid() {
   _d.println(_ylabel);
 }
 
-void TimeBasedGraph::drawValue(float x, float y) {
+void TimeSeriesGraph::drawValue(float x, float y) {
+  if(_graphIndex >= _GRAPH_W){
+    extendDomain(_domain  + 30);
+  }
   if(floatToGraphPos(x, _minT, _domain, _GRAPH_W, _GRAPH_X) >= _graphIndex + _GRAPH_X) {
     _graphStore[_graphIndex] = floatToGraphPos(-y, _minY, _range, _GRAPH_H, _GRAPH_Y);
 
@@ -87,7 +90,33 @@ void TimeBasedGraph::drawValue(float x, float y) {
   }
 }
 
+void TimeSeriesGraph::extendDomain (float newDomain){
+  float newT = newDomain / _GRAPH_W;
+  float oldT = _domain / _GRAPH_W;
+  int oldIndex;
 
-int TimeBasedGraph::floatToGraphPos(float n, float min, float range, int graphRange, int graphOffset){
+  _graphIndex = 0;
+
+  for(oldIndex = 0; oldIndex < _GRAPH_W; oldIndex++){
+    while(oldIndex * oldT >= _graphIndex * newT)
+      _graphIndex ++;
+    _graphStore[_graphIndex] = _graphStore[oldIndex];
+  }
+
+  _graphIndex = (_domain / newDomain) * (float) _GRAPH_W;
+
+  _domain = newDomain;
+  drawGrid();
+  for(oldIndex = 0; oldIndex < _graphIndex; oldIndex++){
+    _d.drawPixel(oldIndex + _GRAPH_X, _graphStore[oldIndex], _POINT_COLOUR);
+  }
+}
+
+void TimeSeriesGraph::reset(){
+  _graphIndex = 0;
+  drawGrid();
+}
+
+int TimeSeriesGraph::floatToGraphPos(float n, float min, float range, int graphRange, int graphOffset){
   return (n - min) * graphRange / (range) + graphOffset;
 }
